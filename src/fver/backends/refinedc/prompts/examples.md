@@ -1,11 +1,11 @@
 # Worked examples
 
-Each example is a complete, accepted submission. Note the pattern: declare
-the mathematical variables, give every pointer argument a type that covers
-exactly the memory the code touches, return ownership in `rc::ensures`, and
-give every loop an invariant with the counter bound.
+Every submission below was accepted by RefinedC exactly as written. The
+pattern: declare the mathematical variables, give every pointer a type that
+covers exactly the memory the code touches, hand ownership back in
+`rc::ensures`, and give every loop an invariant with the counter bound.
 
-## Example 1: zero an array
+## Example 1: zero an array (loop over owned memory, helper lemma)
 
 Original:
 
@@ -19,20 +19,52 @@ Submission:
 
 ```c file=function.c
 [[rc::parameters("p : loc", "n : nat")]]
-[[rc::args("p @ &own<array<int<i32>, {replicate n (uninit (it_layout i32))}>>", "n @ int<size_t>")]]
+[[rc::args("p @ &own<array<i32, {replicate n (uninit (it_layout i32))}>>", "n @ int<size_t>")]]
 [[rc::returns("void")]]
-[[rc::ensures("own p : array<int<i32>, {replicate n (0 @ int<i32>)}>")]]
+[[rc::ensures("own p : array<i32, {replicate n (0 @ int i32)}>")]]
+[[rc::tactics("all: try (apply zero_step; lia).")]]
+[[rc::tactics("all: try (exists i; split; [done|]; split; [by have -> : (n - i = 0)%nat by lia | lia]).")]]
 void zero(int *p, size_t n) {
   [[rc::exists("i : nat")]]
   [[rc::inv_vars("i : i @ int<size_t>",
-                 "p : p @ &own<array<int<i32>, {replicate i (0 @ int<i32>) ++ replicate (n - i) (uninit (it_layout i32))}>>")]]
+                 "p : p @ &own<array<i32, {replicate i (0 @ int i32) ++ replicate (n - i) (uninit (it_layout i32))}>>")]]
   [[rc::constraints("{i ≤ n}")]]
   for (size_t i = 0; i < n; i++) p[i] = 0;
 }
 ```
-Note: the array type at the loop head is split into the part already written and the part still uninitialised; `{i ≤ n}` keeps `n - i` meaningful.
 
-## Example 2: bounded search, returns an index or -1
+```coq file=lemmas.v
+From refinedc.typing Require Import typing.
+
+Section lemmas.
+  Context `{!typeG Σ}.
+
+  Lemma zero_step (x u : type) (i n : nat) :
+    (i < n)%nat →
+    list_subequiv [i] (replicate i x ++ replicate (n - i) u)
+                      (replicate (i + 1) x ++ replicate (n - (i + 1)) u).
+  Proof.
+    move => Hlt j. split.
+    { rewrite !length_app !length_replicate. lia. }
+    move => Hj. have Hne : j ≠ i by set_solver.
+    rewrite !lookup_app.
+    destruct (decide (j < i)%nat) as [Hji|Hji].
+    - rewrite !lookup_replicate_2 //; lia.
+    - rewrite (lookup_ge_None_2 (replicate i x)) ?length_replicate; [|lia].
+      rewrite (lookup_ge_None_2 (replicate (i + 1) x)) ?length_replicate; [|lia].
+      destruct (decide (j < n)%nat).
+      + rewrite !lookup_replicate_2 //; lia.
+      + rewrite !lookup_ge_None_2 ?length_replicate //; lia.
+  Qed.
+End lemmas.
+```
+Note: the array's element list at the loop head is split into the part
+already written and the part still uninitialised. The step case leaves a
+`list_subequiv` goal (proved by the lemma); the exit case needs the witness
+`i` and `n - i = 0`. `array<i32, ...>`: the first argument is the element
+layout, the second the Coq list of element types.
+
+## Example 2: bounded search over shared memory (fully automatic)
 
 Original:
 
@@ -49,9 +81,10 @@ Submission:
 
 ```c file=function.c
 [[rc::parameters("p : loc", "n : nat", "xs : {list Z}", "key : Z")]]
-[[rc::args("p @ &shr<array<int<i32>, {xs `at_type` int<i32>}>>", "n @ int<size_t>", "key @ int<i32>")]]
+[[rc::args("p @ &shr<array<i32, {xs `at_type` int i32}>>", "n @ int<size_t>", "key @ int<i32>")]]
 [[rc::requires("{n = length xs}", "{n ≤ max_int i32}")]]
-[[rc::returns("∃ r. r @ int<i32>")]]
+[[rc::exists("r : Z")]]
+[[rc::returns("r @ int<i32>")]]
 [[rc::ensures("{-1 ≤ r}", "{r < n}")]]
 int find(const int *xs, size_t n, int key) {
   [[rc::exists("i : nat")]]
@@ -63,39 +96,54 @@ int find(const int *xs, size_t n, int key) {
   return -1;
 }
 ```
-Note: `&shr` because the array is only read, so no `ensures` for it. `{n ≤ max_int i32}` is what makes the cast `(int)i` safe.
+Note: `&shr` because the array is only read, so no `ensures` is needed for
+it and the caller keeps it. `{n ≤ max_int i32}` is what makes `(int)i`
+safe. `xs `at_type` int i32` types an initialised array by its values.
 
-## Example 3: copy between two arrays
+## Example 3: two owned pointers, exact results (fully automatic)
 
 Original:
 
 ```c
-void copy(int *dst, const int *src, size_t n) {
-  for (size_t i = 0; i < n; i++) dst[i] = src[i];
+void swap(int *x, int *y) {
+  int t = *x;
+  *x = *y;
+  *y = t;
+}
+
+int min2(int a, int b) {
+  return a < b ? a : b;
 }
 ```
 
-Submission:
+Submission (one function per submission in practice; both shown for the
+patterns):
 
 ```c file=function.c
-[[rc::parameters("d : loc", "s : loc", "n : nat", "xs : {list Z}")]]
-[[rc::args("d @ &own<array<int<i32>, {replicate n (uninit (it_layout i32))}>>",
-           "s @ &shr<array<int<i32>, {xs `at_type` int<i32>}>>",
-           "n @ int<size_t>")]]
-[[rc::requires("{n = length xs}")]]
+[[rc::parameters("pa : loc", "pb : loc", "a : Z", "b : Z")]]
+[[rc::args("pa @ &own<a @ int<i32>>", "pb @ &own<b @ int<i32>>")]]
 [[rc::returns("void")]]
-[[rc::ensures("own d : array<int<i32>, {xs `at_type` int<i32>}>")]]
-void copy(int *dst, const int *src, size_t n) {
-  [[rc::exists("i : nat")]]
-  [[rc::inv_vars("i : i @ int<size_t>",
-                 "dst : d @ &own<array<int<i32>, {(take i xs) `at_type` int<i32> ++ replicate (n - i) (uninit (it_layout i32))}>>")]]
-  [[rc::constraints("{i ≤ n}")]]
-  for (size_t i = 0; i < n; i++) dst[i] = src[i];
+[[rc::ensures("own pa : b @ int<i32>", "own pb : a @ int<i32>")]]
+void swap(int *x, int *y) {
+  int t = *x;
+  *x = *y;
+  *y = t;
 }
 ```
-Note: two pointers, two ownership descriptions. The source is shared and unchanged; the destination's type tracks how much has been copied.
 
-## Example 4: a struct with a length field
+```c file=function.c
+[[rc::parameters("a : Z", "b : Z")]]
+[[rc::args("a @ int<i32>", "b @ int<i32>")]]
+[[rc::returns("{Z.min a b} @ int<i32>")]]
+int min2(int a, int b) {
+  return a < b ? a : b;
+}
+```
+Note: ownership of each pointer is returned with its new contents. For
+UB-freedom alone, `[[rc::returns("int<i32>")]]` would also do for `min2`;
+the exact value is free here and helps callers.
+
+## Example 4: a struct with a length field (fully automatic)
 
 Original:
 
@@ -108,20 +156,32 @@ int buf_last(struct buf *b) {
 }
 ```
 
-Submission (struct annotations are part of the function's file; include them only if the struct is not already annotated):
+Submission (the struct annotation is included because the struct was not
+annotated yet; write it exactly once):
 
 ```c file=function.c
-[[rc::parameters("b : loc", "n : nat", "xs : {list Z}")]]
-[[rc::args("b @ &own<struct<struct_buf, &own<array<int<i32>, {xs `at_type` int<i32>}>>, n @ int<size_t>>>")]]
-[[rc::requires("{n = length xs}")]]
-[[rc::returns("∃ r. r @ int<i32>")]]
-[[rc::ensures("own b : struct<struct_buf, &own<array<int<i32>, {xs `at_type` int<i32>}>>, n @ int<size_t>>")]]
+struct
+[[rc::refined_by("xs : {list Z}")]]
+buf {
+  [[rc::field("&own<array<i32, {xs `at_type` int i32}>>")]]
+  int *data;
+  [[rc::field("{length xs} @ int<size_t>")]]
+  size_t len;
+};
+
+[[rc::parameters("b : loc", "xs : {list Z}")]]
+[[rc::args("b @ &own<xs @ buf>")]]
+[[rc::exists("r : Z")]]
+[[rc::returns("r @ int<i32>")]]
+[[rc::ensures("own b : xs @ buf")]]
 int buf_last(struct buf *b) {
   if (b->len == 0) return 0;
   return b->data[b->len - 1];
 }
 ```
-Note: the struct type lists field types in declaration order. The subtraction `b->len - 1` is on `size_t`, so the only obligation is the bound `n - 1 < length xs`, which follows from `n = length xs` and the guard.
+Note: tying `len` to `length xs` in the struct type is what proves the
+index `b->len - 1` in bounds; the `len == 0` guard makes the subtraction
+safe on `size_t`.
 
 ## Example 5: signed arithmetic needing a lemma
 
@@ -141,8 +201,8 @@ Submission:
 [[rc::parameters("n : Z")]]
 [[rc::args("n @ int<i32>")]]
 [[rc::requires("{0 ≤ n}", "{n ≤ 46340}")]]
-[[rc::returns("∃ r. r @ int<i32>")]]
-[[rc::lemmas("sum_to_bound")]]
+[[rc::exists("r : Z")]]
+[[rc::returns("r @ int<i32>")]]
 [[rc::tactics("all: try (apply sum_to_bound; lia).")]]
 int sum_to(int n) {
   int s = 0;
@@ -155,13 +215,19 @@ int sum_to(int n) {
 ```
 
 ```coq file=lemmas.v
-From Coq Require Import ZArith Lia.
-Open Scope Z_scope.
+From refinedc.typing Require Import typing.
 
-Lemma sum_to_bound (i n : Z) :
-  0 <= i -> i <= n -> n <= 46340 -> i * (i - 1) / 2 + i <= 2147483647.
+Lemma sum_to_bound (i : Z) :
+  0 ≤ i → i ≤ 46340 → (i * (i - 1)) `div` 2 + i ≤ max_int i32.
 Proof.
-  intros. nia.
+  intros Hi Hn.
+  have Hmul : i * (i - 1) ≤ 46340 * 46339 by nia.
+  have Hdiv := Z.div_le_mono (i * (i - 1)) (46340 * 46339) 2 ltac:(lia) Hmul.
+  have Hmax : max_int i32 = 2147483647 by vm_compute.
+  rewrite Hmax. lia.
 Qed.
 ```
-Note: the invariant states the exact partial sum so the overflow obligation `s + i ≤ max_int i32` reduces to arithmetic; `nia` needs the helper because the bound is nonlinear. The precondition `n ≤ 46340` is the real limit below which the sum fits in 32 bits.
+Note: the invariant states the exact partial sum, so the only remaining
+obligation is `s + i ≤ max_int i32`, which is nonlinear; the lemma proves it
+from `n ≤ 46340`, the real limit below which the sum fits in 32 bits. Inside
+Coq, `/` on `Z` prints as `` `div` ``.

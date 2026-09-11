@@ -1,0 +1,1 @@
+File "ex2.c" successfully checked.

@@ -1,0 +1,5 @@
+[31m[lua/lobject.c:496:14-46] Frontend error.
+feature not yet supported: cast operator in `integer constant expressions'
+[0m  char space[BUFVFS];  /* initial buffer */
+             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+[0m

@@ -28,6 +28,47 @@ _TOKEN_RE = re.compile(r"\w+|[^\w\s]")
 
 
 # ---------------------------------------------------------------------------
+# Coq identifiers
+# ---------------------------------------------------------------------------
+
+_COQ_KEYWORDS = frozenset(
+    """as at cofix else end exists exists2 fix for forall fun if IF in let match mod
+    Prop return Set then Type using where with Definition Lemma Theorem Proof Qed
+    Section End Module Import Export Require From Notation Ltac Ltac2 Axiom
+    Parameter Hypothesis Variable Context Class Instance Record Inductive
+    CoInductive Fixpoint CoFixpoint""".split()
+)
+_IDENT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+def coq_ident(name: str, prefix: str = "x") -> str:
+    """A valid Coq/dune module-path segment derived from `name`.
+
+    RefinedC turns every directory segment under the project and the C file
+    stem into a Coq module path, so each must start with a letter and contain
+    only letters, digits and underscores, and must not be a keyword.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
+    if not cleaned or not cleaned[0].isalpha() or cleaned in _COQ_KEYWORDS:
+        cleaned = f"{prefix}_{cleaned}" if cleaned else prefix
+    if not _IDENT_RE.match(cleaned):  # pragma: no cover - defensive
+        cleaned = re.sub(r"[^A-Za-z0-9_]", "_", prefix + "_" + cleaned)
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Comment directives  //@rc::<name> <payload>
+# ---------------------------------------------------------------------------
+
+_DIRECTIVE_RE = re.compile(r"^[ \t]*//@rc::(?P<name>[A-Za-z_]+)(?P<payload>[^\n]*)$", re.MULTILINE)
+
+
+def find_directives(text: str) -> list[tuple[str, str]]:
+    """All `//@rc::<name> ...` comment directives as (name, payload)."""
+    return [(m.group("name"), m.group("payload").strip()) for m in _DIRECTIVE_RE.finditer(text)]
+
+
+# ---------------------------------------------------------------------------
 # Attribute scanning
 # ---------------------------------------------------------------------------
 
@@ -288,8 +329,7 @@ def extract_contract(annotated_fn_text: str) -> str:
     """The attribute block plus the signature, as a prototype ending in ';'.
 
     This is what callers depend on. Attributes are kept verbatim (except
-    rc::tactics / rc::lemmas / rc::import, which belong to the proof, not
-    the contract)."""
+    rc::tactics / rc::lemmas, which belong to the proof, not the contract)."""
     text = annotated_fn_text.lstrip()
     attrs = find_attributes(text)
     pos = 0
@@ -299,7 +339,7 @@ def extract_contract(annotated_fn_text: str) -> str:
         # after non-whitespace code (a loop annotation inside the body).
         if text[pos : a.start].strip():
             break
-        if a.name not in (facts.ATTR_TACTICS, facts.ATTR_LEMMAS, facts.ATTR_IMPORT):
+        if a.name not in (facts.ATTR_TACTICS, facts.ATTR_LEMMAS):
             kept.append(a.text)
         pos = a.end
     rest = text[pos:]

@@ -1,4 +1,0 @@
-[refinedc] Preprocessing zero.c
-[refinedc] Running Cerberus front-end
-zero.c:7:3: error: unknown attribute rc::argz
-[refinedc] Cerberus front-end failed: Parse error while parsing annotation

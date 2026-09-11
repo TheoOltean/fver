@@ -1,3 +1,0 @@
-[refinedc] Running Cerberus front-end
-find.c:4:14: undefined behaviour: out-of-bounds pointer arithmetic (UB045)
-[refinedc] Cerberus front-end failed

@@ -1,0 +1,2 @@
+[31m[lua/lobject.h:54:3:] Not implemented: layout_of (Basic float)
+[0m

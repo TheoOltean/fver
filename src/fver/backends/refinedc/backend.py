@@ -1,24 +1,31 @@
 """RefinedC backend: verify C functions with RefinedC on Rocq.
 
 Settings ([backend.refinedc] in config.toml), all optional:
-  refinedc_bin       = "refinedc"   path/name of the refinedc CLI
-  coqc_bin           = "coqc"       Coq/Rocq compiler used for the audit
-  dune_bin           = "dune"
-  cerberus_bin       = "cerberus"
-  coq_root           = "refinedc.project.fver"  logical root of generated files
-  extra_check_args   = []           extra argv appended to `refinedc check`
-  pass_include_flags = false        forward -I/-D from the build to refinedc check
-  keep_artifacts     = true         keep generated .v files after a check
-  allowed_axioms     = []           extra axiom names the audit tolerates
+  refinedc_bin        = "refinedc"   path/name of the refinedc CLI
+  coqc_bin            = "coqc"       Rocq compiler used for the audit
+  dune_bin            = "dune"
+  coq_root            = "refinedc.project.fver"  logical root of generated files
+  extra_check_args    = []           extra argv appended to `refinedc check`
+  include_dirs        = []           extra -I directories (absolute or repo-relative)
+  defines             = []           extra -D macros
+  forward_build_flags = true         forward -I/-D from the captured build
+  allowed_axioms      = []           extra axiom names the audit tolerates
 
-Nothing here ever writes outside the backend workspace directory, and the
-user's source files are only ever read.
+The backend never writes outside its workspace directory
+(<repo>/.fver/backend/refinedc/); user sources are only read. Every path
+segment it creates under the workspace is a valid Coq identifier, because
+RefinedC turns directory names and file stems into Coq module paths.
+
+RefinedC (and dune underneath) must not run concurrently in one project:
+dune holds a build lock. A process-wide lock serialises tool invocations.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +41,11 @@ from fver.backends.base import (
 )
 from fver.backends.refinedc import annotations as ann
 from fver.backends.refinedc import facts
-from fver.backends.refinedc.parse_output import classify
+from fver.backends.refinedc.parse_output import (
+    classify_full,
+    extract_frontend_errors,
+    strip_ansi,
+)
 from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit, sha256_text
 from fver.util.platform import install_hint
 from fver.util.proc import run, version_of, which
@@ -42,14 +53,46 @@ from fver.util.proc import run, version_of, which
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 INSTALL_HINT = (
-    "Install via opam: `opam repo add coq-released https://coq.inria.fr/opam/released && "
-    "opam repo add iris-dev https://gitlab.mpi-sws.org/iris/opam.git && "
-    "opam pin add refinedc https://gitlab.mpi-sws.org/iris/refinedc.git`"
+    "Install via opam (see RefinedC's README): `opam repo add coq-released "
+    "https://coq.inria.fr/opam/released && opam repo add iris-dev "
+    "https://gitlab.mpi-sws.org/iris/opam.git && opam update && opam pin add -n -y cerberus-lib "
+    "'git+https://github.com/rems-project/cerberus.git#f11e6b335a687c1b77539f7e5695607d09dfc3ea' "
+    "&& opam pin add refinedc git+https://gitlab.mpi-sws.org/iris/refinedc.git`"
 )
 
+_TOOL_LOCK = threading.Lock()
 
-def _safe(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_") or "x"
+
+def _tool_env(*bins: str) -> dict[str, str]:
+    """Environment for running RefinedC outside an activated opam switch.
+
+    refinedc shells out to dune and rocq (they must be on PATH next to it),
+    finds its own include directory through OPAM_SWITCH_PREFIX (frontend/
+    main.ml) and the Cerberus libc through the switch's runtime directory.
+    When the configured binary lives in <prefix>/bin/, point those variables
+    at <prefix>: the binary's own switch is authoritative even if the shell
+    has another switch activated.
+    """
+    env = dict(os.environ)
+    resolved = [Path(which(b) or b).resolve() for b in bins if b]
+    dirs = [str(p.parent) for p in resolved if p.is_absolute() and p.parent.is_dir()]
+    if dirs:
+        env["PATH"] = os.pathsep.join(dict.fromkeys(dirs + env.get("PATH", "").split(os.pathsep)))
+    for p in resolved:
+        prefix = p.parent.parent
+        if p.parent.name == "bin" and (prefix / "lib" / "refinedc").is_dir():
+            env["OPAM_SWITCH_PREFIX"] = str(prefix)
+            runtime = prefix / "lib" / "cerberus-lib" / "runtime"
+            if runtime.is_dir():
+                env["CERB_RUNTIME"] = str(runtime)
+            break
+    return env
+
+
+def _first_line(text: str | None) -> str | None:
+    if not text:
+        return None
+    return text.strip().splitlines()[0] if text.strip() else None
 
 
 class RefinedCBackend:
@@ -63,11 +106,11 @@ class RefinedCBackend:
         self.refinedc_bin: str = self.settings.get("refinedc_bin", facts.REFINEDC_BIN)
         self.coqc_bin: str = self.settings.get("coqc_bin", facts.COQC_BIN)
         self.dune_bin: str = self.settings.get("dune_bin", facts.DUNE_BIN)
-        self.cerberus_bin: str = self.settings.get("cerberus_bin", facts.CERBERUS_BIN)
         self.coq_root: str = self.settings.get("coq_root", facts.DEFAULT_COQ_ROOT)
         self.extra_check_args: list[str] = list(self.settings.get("extra_check_args", []))
-        self.pass_include_flags: bool = bool(self.settings.get("pass_include_flags", False))
-        self.keep_artifacts: bool = bool(self.settings.get("keep_artifacts", True))
+        self.include_dirs: list[str] = list(self.settings.get("include_dirs", []))
+        self.defines: list[str] = list(self.settings.get("defines", []))
+        self.forward_build_flags: bool = bool(self.settings.get("forward_build_flags", True))
         self.allowed_axioms = set(facts.ALLOWED_AXIOMS) | set(
             self.settings.get("allowed_axioms", [])
         )
@@ -78,48 +121,49 @@ class RefinedCBackend:
     def _have_refinedc(self) -> bool:
         return which(self.refinedc_bin) is not None
 
+    def _env(self) -> dict[str, str]:
+        return _tool_env(self.refinedc_bin, self.coqc_bin, self.dune_bin)
+
+    def _run(self, argv: list[str], cwd: Path, timeout: float):
+        with _TOOL_LOCK:
+            return run(argv, cwd=cwd, timeout=timeout, env=self._env())
+
     def doctor(self) -> list[ToolStatus]:
-        def status(
-            binname: str, required: bool, hint: str, version_argv: list[str] | None = None
-        ) -> ToolStatus:
+        def status(label: str, binname: str, required: bool, hint: str) -> ToolStatus:
             path = which(binname)
-            ver = version_of([binname] + (version_argv or ["--version"])) if path else None
+            ver = _first_line(version_of([binname, "--version"])) if path else None
             return ToolStatus(
-                name=binname,
+                name=label,
                 found=path is not None,
                 path=path,
-                version=ver,
+                version=ver or (path if path else None),
                 required=required,
                 hint=hint,
             )
 
-        coq_hint = "Install Rocq/Coq via opam (`opam install coq` or `opam install rocq-prover`)."
-        out = [
-            status(self.refinedc_bin, True, INSTALL_HINT),
-            status(self.coqc_bin, True, coq_hint),
-            status(self.dune_bin, True, "`opam install dune`"),
+        coq_hint = "Install Rocq via opam: `opam install rocq-prover` (RefinedC pulls it in)."
+        rows = [
+            status("refinedc", self.refinedc_bin, True, INSTALL_HINT),
+            status("coqc", self.coqc_bin, True, coq_hint),
+            status("dune", self.dune_bin, True, "`opam install dune`"),
             status(
+                "opam",
                 facts.OPAM_BIN,
                 False,
                 install_hint("opam", url="https://opam.ocaml.org/doc/Install.html"),
             ),
-            status(
-                self.cerberus_bin,
-                False,
-                "Installed as a RefinedC dependency; `opam install cerberus` otherwise.",
-            ),
         ]
-        if not out[1].found and which(facts.ROCQ_BIN):
-            out[1] = status(facts.ROCQ_BIN, True, coq_hint)
-        return out
+        if not rows[1].found and which(facts.ROCQ_BIN):
+            rows[1] = status("coqc", facts.ROCQ_BIN, True, coq_hint)
+        return rows
 
     def tool_versions(self) -> dict[str, str]:
         if self._versions is None:
             v: dict[str, str] = {}
-            for binname in (self.refinedc_bin, self.coqc_bin, self.cerberus_bin):
-                ver = version_of([binname, "--version"])
+            for label, binname in (("refinedc", self.refinedc_bin), ("coqc", self.coqc_bin)):
+                ver = _first_line(version_of([binname, "--version"]))
                 if ver:
-                    v[Path(binname).name] = ver
+                    v[label] = ver
             self._versions = v
         return dict(self._versions)
 
@@ -133,34 +177,100 @@ class RefinedCBackend:
         if self.project_file.exists():
             return
         if self._have_refinedc():
-            r = run([self.refinedc_bin, *facts.INIT_ARGV], cwd=self.workspace_dir, timeout=120)
+            argv = [
+                self.refinedc_bin,
+                *facts.INIT_ARGV,
+                facts.INIT_COQ_PATH_FLAG.format(path=self.coq_root),
+            ]
+            r = self._run(argv, self.workspace_dir, 120)
             if r.ok and self.project_file.exists():
                 return
-        # Fall back to writing the project file ourselves (facts.PROJECT_FILE_TEMPLATE).
+        # Fall back to writing the project file ourselves so the rest of the
+        # pipeline (and tests) can run without the tool.
         self.project_file.write_text(
             facts.PROJECT_FILE_TEMPLATE.format(coq_root=self.coq_root), encoding="utf-8"
         )
 
+    # Paths -------------------------------------------------------------------
+
+    def _tu_dir(self, tu: TranslationUnit) -> Path:
+        return self.workspace_dir / "src" / ann.coq_ident("tu_" + tu.id, "tu")
+
+    def _check_dir(self, task: FunctionTask) -> Path:
+        d = self.workspace_dir / "checks" / ann.coq_ident("f_" + task.function.id, "f")
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _stem_for(source_path: str) -> str:
+        return ann.coq_ident(Path(source_path).stem, "f")
+
     def _module_path(self, c_file: Path) -> str:
-        """Coq module path of the generated files for a .c file inside the project."""
-        rel = c_file.resolve().relative_to(self.workspace_dir.resolve()).with_suffix("")
-        return ".".join(_safe(p) for p in rel.parts)
+        rel = c_file.resolve().relative_to(self.workspace_dir.resolve())
+        parts = [ann.coq_ident(p) for p in rel.parent.parts] + [ann.coq_ident(rel.stem, "f")]
+        return ".".join(parts)
 
     def _proofs_dir(self, c_file: Path) -> Path:
-        rel = c_file.resolve().relative_to(self.workspace_dir.resolve()).with_suffix("")
-        return self.workspace_dir / facts.PROOFS_DIR_NAME / rel
+        return c_file.parent / facts.PROOFS_DIR_NAME / ann.coq_ident(c_file.stem, "f")
 
-    def _check_argv(self, c_file: Path, tu: TranslationUnit | None) -> list[str]:
-        argv = [self.refinedc_bin, *facts.CHECK_ARGV, str(c_file)]
-        if self.pass_include_flags and tu is not None:
-            for i, a in enumerate(tu.arguments):
+    def _build_dir_for(self, c_file: Path) -> Path:
+        rel = self._proofs_dir(c_file).resolve().relative_to(self.workspace_dir.resolve())
+        return self.workspace_dir / facts.DUNE_BUILD_DIR / rel
+
+    def _cpp_flags(self, tu: TranslationUnit | None, repo_root: Path | None) -> list[str]:
+        """-I / -D for `refinedc check`: the original source's directory (so
+        sibling headers resolve although we check a copy), then the captured
+        build's include dirs and defines, then configured extras."""
+        flags: list[str] = []
+        seen: set[str] = set()
+
+        def add_inc(d: str) -> None:
+            p = Path(d)
+            if not p.is_absolute() and tu is not None:
+                p = Path(tu.directory) / p
+            key = str(p)
+            if key not in seen:
+                seen.add(key)
+                flags.append(facts.INCLUDE_FLAG_FMT.format(dir=key))
+
+        if tu is not None and repo_root is not None:
+            add_inc(str((Path(repo_root) / tu.source_path).parent))
+        if tu is not None and self.forward_build_flags:
+            args = tu.arguments
+            i = 1
+            while i < len(args):
+                a = args[i]
+                if a == "-I" and i + 1 < len(args):
+                    add_inc(args[i + 1])
+                    i += 2
+                    continue
                 if a.startswith("-I") and len(a) > 2:
-                    argv.append(facts.INCLUDE_FLAG_FMT.format(dir=a[2:]))
-                elif a == "-I" and i + 1 < len(tu.arguments):
-                    argv.append(facts.INCLUDE_FLAG_FMT.format(dir=tu.arguments[i + 1]))
+                    add_inc(a[2:])
+                elif a == "-D" and i + 1 < len(args):
+                    flags.append(facts.DEFINE_FLAG_FMT.format(macro=args[i + 1]))
+                    i += 2
+                    continue
                 elif a.startswith("-D") and len(a) > 2:
-                    argv.append(facts.DEFINE_FLAG_FMT.format(macro=a[2:]))
+                    flags.append(a)
+                i += 1
+        for d in self.include_dirs:
+            p = Path(d)
+            if not p.is_absolute() and repo_root is not None:
+                p = Path(repo_root) / p
+            add_inc(str(p))
+        for m in self.defines:
+            flags.append(facts.DEFINE_FLAG_FMT.format(macro=m))
+        return flags
+
+    def _check_argv(
+        self, c_file: Path, tu: TranslationUnit | None, repo_root: Path | None, no_build: bool
+    ) -> list[str]:
+        argv = [self.refinedc_bin, *facts.CHECK_ARGV, facts.NO_EXTRA_ANALYSIS_FLAG]
+        if no_build:
+            argv.append(facts.NO_BUILD_FLAG)
+        argv += self._cpp_flags(tu, repo_root)
         argv += self.extra_check_args
+        argv.append(str(c_file))
         return argv
 
     # -------------------------------------------------------------- translate
@@ -170,9 +280,9 @@ class RefinedCBackend:
     ) -> TranslateResult:
         names = [f.name for f in functions]
         src = Path(repo_root) / tu.source_path
-        dest_dir = self.workspace_dir / "src" / tu.id
+        dest_dir = self._tu_dir(tu)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / Path(tu.source_path).name
+        dest = dest_dir / f"{self._stem_for(tu.source_path)}.c"
         try:
             text = src.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
@@ -181,8 +291,10 @@ class RefinedCBackend:
                 reasons={n: f"cannot read source: {e}" for n in names},
                 tu_error=str(e),
             )
+        offset = 0
         if not ann.has_refinedc_include(text):
             text = facts.HEADER_INCLUDE + "\n" + text
+            offset = 1
         dest.write_text(text, encoding="utf-8")  # a copy; the user's file is untouched
         if not self._have_refinedc():
             reason = "refinedc not installed; front-end check skipped"
@@ -192,36 +304,47 @@ class RefinedCBackend:
                 artifacts={"copy": str(dest)},
             )
         self.prepare([tu], repo_root)
-        r = run(self._check_argv(dest, tu), cwd=self.workspace_dir, timeout=600)
-        combined = r.stdout + "\n" + r.stderr
-        if r.ok:
+        r = self._run(self._check_argv(dest, tu, repo_root, no_build=True), self.workspace_dir, 600)
+        combined = strip_ansi(r.stdout + "\n" + r.stderr)
+        if r.ok and facts.INTERNAL_ERROR_MARKER not in combined:
             return TranslateResult(
                 supported={n: True for n in names}, artifacts={"copy": str(dest)}
             )
-        # Map errors to functions by line (the copy has one extra header line).
-        offset = (
-            0 if ann.has_refinedc_include(src.read_text(encoding="utf-8", errors="replace")) else 1
-        )
         supported = {n: True for n in names}
         reasons: dict[str, str] = {}
-        tu_error: str | None = None
-        for ln in combined.splitlines():
-            m = re.search(facts.LOCATION_REGEX, ln)
-            if not m:
-                continue
-            line = int(m.group("line")) - offset
-            hit = next((f for f in functions if f.start_line <= line <= f.end_line), None)
-            if hit is not None:
-                supported[hit.name] = False
-                reasons[hit.name] = ln.strip()
-            else:
-                tu_error = (tu_error + "\n" if tu_error else "") + ln.strip()
-        if tu_error is None and all(supported.values()):
-            tu_error = "refinedc check failed: " + "\n".join(combined.strip().splitlines()[-10:])
-        if tu_error and all(supported.values()):
-            # A whole-file failure we could not attribute to a function.
-            supported = {n: False for n in names}
-            reasons = {n: "translation unit rejected by the front-end" for n in names}
+        tu_errors: list[str] = []
+        if r.returncode == facts.EXIT_INTERNAL_ERROR or facts.INTERNAL_ERROR_MARKER in combined:
+            first = next(
+                (
+                    ln.strip()
+                    for ln in combined.splitlines()
+                    if "Failure" in ln or "exception" in ln
+                ),
+                "refinedc internal error",
+            )
+            tu_errors.append(f"refinedc front-end crashed on this file: {first}")
+        for e in extract_frontend_errors(combined):
+            same_file = Path(e.file).name == dest.name or Path(e.file).name == src.name
+            if same_file and e.line is not None:
+                line = e.line - offset
+                hit = next((f for f in functions if f.start_line <= line <= f.end_line), None)
+                if hit is not None:
+                    supported[hit.name] = False
+                    reasons[hit.name] = f"line {line}: {e.message}"
+                    continue
+            tu_errors.append(f"{Path(e.file).name}:{e.line}: {e.message}")
+        if not tu_errors and all(supported.values()):
+            tu_errors.append(
+                "refinedc check failed: " + " | ".join(combined.strip().splitlines()[-3:])
+            )
+        tu_error = "\n".join(dict.fromkeys(tu_errors)) if tu_errors else None
+        if tu_error:
+            # An error outside any function (a header, a type, a crash) means
+            # the whole file cannot be translated.
+            for n in names:
+                if supported[n]:
+                    supported[n] = False
+                    reasons[n] = "file rejected by the front-end: " + tu_error.splitlines()[0]
         return TranslateResult(
             supported=supported, reasons=reasons, tu_error=tu_error, artifacts={"copy": str(dest)}
         )
@@ -232,7 +355,7 @@ class RefinedCBackend:
         return SubmissionSpec(
             files={
                 "function.c": "the target function with RefinedC annotations; code otherwise unchanged",
-                facts.LEMMAS_FILE: "optional Rocq helper lemmas (only when a pure side condition needs one)",
+                facts.LEMMAS_FILE: "optional Rocq helper lemmas, applied from rc::tactics",
             },
             required=["function.c"],
             language_hints={"function.c": "c", facts.LEMMAS_FILE: "coq"},
@@ -243,9 +366,9 @@ class RefinedCBackend:
             p = _PROMPTS_DIR / name
             return p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
 
-        forbidden = [re.escape(a) for a in facts.LLM_FORBIDDEN_ATTRIBUTES] + list(
-            facts.FORBIDDEN_COQ_PATTERNS
-        )
+        forbidden = [re.escape(a) for a in facts.LLM_FORBIDDEN_ATTRIBUTES] + [
+            r"//@rc::" + d + r"\b" for d in facts.LLM_FORBIDDEN_DIRECTIVES
+        ]
         return PromptContext(
             reference=read("reference.md"),
             examples=read("examples.md"),
@@ -264,6 +387,11 @@ class RefinedCBackend:
             for a in ann.find_attributes(fn):
                 if a.name in facts.LLM_FORBIDDEN_ATTRIBUTES:
                     problems.append(f"forbidden attribute {a.name}")
+            for name, _payload in ann.find_directives(fn):
+                if name in facts.LLM_FORBIDDEN_DIRECTIVES:
+                    problems.append(
+                        f"forbidden directive //@rc::{name} (the backend wires lemmas.v itself)"
+                    )
             for m in re.finditer(r"^\s*#\s*include\b.*$", fn, re.MULTILINE):
                 if "refinedc.h" not in m.group(0):
                     problems.append(f"submission adds an include: {m.group(0).strip()}")
@@ -280,24 +408,16 @@ class RefinedCBackend:
 
     # ------------------------------------------------------------------ check
 
-    def _check_dir(self, task: FunctionTask) -> Path:
-        wd = Path(task.workdir)
-        try:
-            wd.resolve().relative_to(self.workspace_dir.resolve())
-        except ValueError:
-            wd = self.workspace_dir / "checks" / _safe(task.function.id)
-        wd.mkdir(parents=True, exist_ok=True)
-        return wd
+    def _build_source(
+        self, task: FunctionTask, annotated_fn: str, lemmas_path: str | None
+    ) -> tuple[str, int, int]:
+        """Return (spliced source, marker line, lines inserted before the function).
 
-    def _build_source(self, task: FunctionTask, annotated_fn: str, lemmas_path: str | None) -> str:
-        fn_text = annotated_fn
-        if lemmas_path:
-            # The backend, not the LLM, wires the helper module in.
-            imp = facts.IMPORT_ATTR_FMT.format(module=facts.LEMMAS_MODULE, path=lemmas_path)
-            fn_text = imp + "\n" + fn_text.lstrip()
-        # Verified callees and externals become spec-carrying prototypes; if a
-        # callee is defined in this file its definition is replaced (so it is
-        # not re-verified), otherwise the prototype is prepended.
+        Verified callees and externals become spec-carrying prototypes; a callee
+        defined in this file is replaced by its prototype (so it is not
+        re-verified), others are prepended. The line marker function goes
+        first after the includes so Coq-level locations can be mapped back.
+        """
         callee_repl: dict[str, tuple[FunctionInfo, str]] = {}
         prototypes: list[str] = []
         for cname, contract in {**task.external_specs, **task.callee_specs}.items():
@@ -317,8 +437,44 @@ class RefinedCBackend:
                 callee_repl[cname] = (info, proto)
             else:
                 prototypes.append(proto)
-        spliced = ann.splice(task.source_text, task.function, fn_text, callee_repl)
-        return ann.prepend_prototypes(spliced, prototypes)
+        spliced = ann.splice(task.source_text, task.function, annotated_fn, callee_repl)
+        head = [facts.LINE_MARKER_TEXT]
+        if lemmas_path:
+            head.append(
+                facts.IMPORT_DIRECTIVE_FMT.format(module=facts.LEMMAS_MODULE, path=lemmas_path)
+            )
+        block = head + prototypes
+        before = spliced.count("\n") + 1
+        out = ann.prepend_prototypes(spliced, block)
+        inserted = out.count("\n") + 1 - before
+        marker_line = next(
+            (i + 1 for i, ln in enumerate(out.split("\n")) if facts.LINE_MARKER_FN in ln), 0
+        )
+        # The include added by splice() (if any) also shifts the function.
+        added_include = 1 if not ann.has_refinedc_include(task.source_text) else 0
+        return out, marker_line, inserted + added_include
+
+    @staticmethod
+    def _marker_offset(generated_code: str, marker_source_line: int) -> int | None:
+        """Reported line of the marker's `return` minus its source line."""
+        text = generated_code
+        m = re.search(
+            r"Definition\s+"
+            + re.escape(facts.IMPL_DEF_FMT.format(fn=facts.LINE_MARKER_FN))
+            + r"\b(?P<body>.*?)\|\}\.",
+            text,
+            re.DOTALL,
+        )
+        if not m or marker_source_line <= 0:
+            return None
+        locs = set(re.findall(r"\bloc_\d+\b", m.group("body")))
+        lines: list[int] = []
+        for lm in re.finditer(facts.LOCATION_INFO_REGEX, text):
+            if lm.group("name") in locs:
+                lines.append(int(lm.group("l1")))
+        if not lines:
+            return None
+        return min(lines) - marker_source_line
 
     def check(
         self, task: FunctionTask, submission: Submission, timeout_seconds: int
@@ -335,16 +491,17 @@ class RefinedCBackend:
                 feedback="Submission rejected before checking:\n- " + "\n- ".join(problems),
             )
         wd = self._check_dir(task)
-        stem = _safe(Path(task.function.source_path).stem) or "unit"
-        c_file = wd / f"{stem}.c"
+        c_file = wd / f"{self._stem_for(task.function.source_path)}.c"
         proofs_dir = self._proofs_dir(c_file)
+        if proofs_dir.exists():
+            shutil.rmtree(proofs_dir, ignore_errors=True)
         lemmas_text = submission.files.get(facts.LEMMAS_FILE)
         lemmas_path: str | None = None
         if lemmas_text:
             proofs_dir.mkdir(parents=True, exist_ok=True)
             (proofs_dir / facts.LEMMAS_FILE).write_text(lemmas_text, encoding="utf-8")
             lemmas_path = f"{self.coq_root}.{self._module_path(c_file)}"
-        source = self._build_source(task, annotated, lemmas_path)
+        source, marker_line, shift = self._build_source(task, annotated, lemmas_path)
         c_file.write_text(source, encoding="utf-8")
         artifacts = {"source": str(c_file)}
         if lemmas_text:
@@ -357,28 +514,52 @@ class RefinedCBackend:
                 tool_versions=self.tool_versions(),
             )
         self.prepare([task.tu], task.repo_root)
-        r = run(self._check_argv(c_file, task.tu), cwd=self.workspace_dir, timeout=timeout_seconds)
-        outcome, feedback, goals, witness = classify(
-            r.stdout, r.stderr, r.returncode, r.timed_out, task.function.name
+        r = self._run(
+            self._check_argv(c_file, task.tu, task.repo_root, no_build=False),
+            self.workspace_dir,
+            timeout_seconds,
+        )
+        # Map preprocessed line numbers back to the source we wrote.
+        src_lines = source.split("\n")
+        line_of = None
+        code_v = proofs_dir / facts.GENERATED_CODE
+        if code_v.exists():
+            offset = self._marker_offset(
+                code_v.read_text(encoding="utf-8", errors="replace"), marker_line
+            )
+            if offset is not None:
+                fn_start = task.function.start_line + shift
+
+                def line_of(
+                    reported: int, _o=offset, _s=shift, _f=fn_start
+                ) -> tuple[int, str] | None:
+                    idx = reported - _o
+                    if 1 <= idx <= len(src_lines):
+                        # Report in the coordinates of the user's file when the
+                        # line is at/after the insertion point.
+                        user_line = idx - _s if idx >= _f - 0 else idx
+                        return user_line, src_lines[idx - 1]
+                    return None
+
+        cl = classify_full(
+            r.stdout, r.stderr, r.returncode, r.timed_out, task.function.name, line_of
         )
         generated = sorted(proofs_dir.glob("*.v")) if proofs_dir.exists() else []
         for g in generated:
             artifacts[g.name] = str(g)
         proof_hash = None
-        if outcome is CheckOutcome.OK:
+        if cl.outcome is CheckOutcome.OK:
             h = "\n".join(
                 f"{g.name}\n{g.read_text(encoding='utf-8', errors='replace')}" for g in generated
             )
             proof_hash = sha256_text(h + "\n" + submission.content_hash())
-        elif not self.keep_artifacts and proofs_dir.exists():
-            shutil.rmtree(proofs_dir, ignore_errors=True)
         assumptions = [f"external:{n}" for n in task.external_specs] + [
             f"callee:{n}" for n in task.callee_specs
         ]
         return CheckResult(
-            outcome=outcome,
-            feedback=feedback,
-            goals=goals,
+            outcome=cl.outcome,
+            feedback=cl.feedback,
+            goals=cl.goals,
             stdout=r.stdout,
             stderr=r.stderr,
             artifacts=artifacts,
@@ -386,7 +567,7 @@ class RefinedCBackend:
             assumptions=assumptions,
             tool_versions=self.tool_versions(),
             duration_seconds=r.duration,
-            witness=witness,
+            witness=cl.witness,
         )
 
     # ------------------------------------------------------------------ audit
@@ -402,20 +583,27 @@ class RefinedCBackend:
             )
         for name, path in result.artifacts.items():
             p = Path(path)
-            if p.suffix == ".v" and p.exists():
+            if p.suffix == ".v" and p.exists() and not p.name.startswith("generated_"):
                 text = p.read_text(encoding="utf-8", errors="replace")
                 for pat in facts.FORBIDDEN_COQ_PATTERNS:
                     if re.search(pat, text):
                         violations.append(f"{name}: forbidden construct /{pat}/")
+        proof_text = Path(proof_file).read_text(encoding="utf-8", errors="replace")
+        if "Admitted" in proof_text or "trust_me" in proof_text:
+            violations.append(f"{proof_name}: proof is not closed by Qed")
         if not which(self.coqc_bin):
             violations.append(
                 "audit tool unavailable: coqc not found; cannot run Print Assumptions"
             )
             return AuditResult(passed=False, violations=violations)
         c_file = Path(result.artifacts.get("source", ""))
-        modpath = self._module_path(c_file) if c_file.exists() else _safe(fn)
-        proofs_dir = Path(proof_file).parent
-        audit_file = proofs_dir / facts.AUDIT_FILE_FMT.format(fn=fn)
+        if not c_file.exists():
+            return AuditResult(passed=False, violations=violations + ["checked source not found"])
+        modpath = self._module_path(c_file)
+        build_dir = self._build_dir_for(c_file)
+        audit_dir = self.workspace_dir / "audits" / ann.coq_ident("f_" + task.function.id, "f")
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_file = audit_dir / facts.AUDIT_FILE_FMT.format(fn=ann.coq_ident(fn, "f"))
         audit_file.write_text(
             facts.AUDIT_SCRIPT_FMT.format(
                 coq_root=self.coq_root,
@@ -425,13 +613,12 @@ class RefinedCBackend:
             ),
             encoding="utf-8",
         )
-        build_dir = self.workspace_dir / facts.DUNE_BUILD_DIR / facts.PROOFS_DIR_NAME
-        r = run(
-            [self.coqc_bin, "-Q", str(build_dir), self.coq_root, str(audit_file)],
-            cwd=proofs_dir,
-            timeout=600,
+        r = self._run(
+            [self.coqc_bin, "-Q", str(build_dir), f"{self.coq_root}.{modpath}", str(audit_file)],
+            audit_dir,
+            600,
         )
-        out = r.stdout + "\n" + r.stderr
+        out = strip_ansi(r.stdout + "\n" + r.stderr)
         assumptions: list[str] = []
         if facts.AUDIT_CLOSED_MARKER in out:
             pass
@@ -440,14 +627,18 @@ class RefinedCBackend:
             for ln in block.splitlines():
                 m = re.match(r"\s*([A-Za-z_][\w.']*)\s*:", ln)
                 if m:
-                    assumptions.append(m.group(1))
+                    assumptions.append("axiom:" + m.group(1))
             for a in assumptions:
-                if a not in self.allowed_axioms and a.split(".")[-1] not in self.allowed_axioms:
-                    violations.append(f"unexpected axiom: {a}")
+                bare = a[len("axiom:") :]
+                if (
+                    bare not in self.allowed_axioms
+                    and bare.split(".")[-1] not in self.allowed_axioms
+                ):
+                    violations.append(f"unexpected axiom: {bare}")
         else:
             violations.append("audit failed to run: " + "\n".join(out.strip().splitlines()[-5:]))
         assumptions += [a for a in result.assumptions if a not in assumptions]
-        v = self.tool_versions().get(Path(self.refinedc_bin).name)
+        v = self.tool_versions().get("refinedc")
         if v:
             assumptions.append(f"refinedc:{v}")
         return AuditResult(passed=not violations, assumptions=assumptions, violations=violations)

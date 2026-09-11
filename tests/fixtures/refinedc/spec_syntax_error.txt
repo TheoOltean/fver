@@ -1,0 +1,8 @@
+Entering directory '/private/tmp/claude-501/-Users-theooltean-programming-projects-formal-verification/ca000f62-ab3e-4c5b-a3a3-6dfa9f5481b3/scratchpad/rcproj'
+        rocq proofs/zero2/generated_spec.{glob,vo} (exit 1)
+File "./proofs/zero2/generated_spec.v", line 18, characters 86-87:
+Error: Syntax error: [term] expected after '>' (in [term]).
+
+Leaving directory '/private/tmp/claude-501/-Users-theooltean-programming-projects-formal-verification/ca000f62-ab3e-4c5b-a3a3-6dfa9f5481b3/scratchpad/rcproj'
+[31mThe call to [dune] returned with error code 1.
+[0m

@@ -1,0 +1,37 @@
+Entering directory '/private/tmp/claude-501/-Users-theooltean-programming-projects-formal-verification/ca000f62-ab3e-4c5b-a3a3-6dfa9f5481b3/scratchpad/rcproj'
+        rocq proofs/stuck1/.refinedc.project.rcproj.theory.d
+        rocq proofs/stuck1/generated_code.{glob,vo}
+        rocq proofs/stuck1/generated_spec.{glob,vo}
+File "proofs/stuck1/dune", lines 2-5, characters 0-247:
+2 | (rocq.theory
+3 |  (flags :standard -w -notation-incompatible-prefix -w -redundant-canonical-projection)
+4 |  (name refinedc.project.rcproj.stuck1)
+5 |  (theories Ltac2 RecordUpdate Stdlib caesium iris lithium refinedc.typing refinedc.typing.automation stdpp))
+        rocq proofs/stuck1/generated_proof_set1.{glob,vo} (exit 1)
+Type system got stuck in function "set1" in block "#0" !
+Location: "stuck1.c" [ 129 : 2 - 129 : 9 ]
+up to date: true
+Goal:
+arg_p : loc
+p : loc
+x : Z
+Q : (gmap label stmt)
+R : (val → type → iProp Σ)
+---------------------------------------
+--------------------------------------∗
+[{ ‖-‖ ty3 ← {typed_write_end false ⊤ (IntOp i32) 
+                (i2v 1 i32) (1 @ int<i32>) p Shr (x @ int<i32>)};
+   inhale own arg_p ∶ p @ &shr<ty3>;
+   inhale True;
+   {typed_stmt (Return VOID) impl_set1 [arg_p] R Q}
+}]
+
+
+File "./proofs/stuck1/generated_proof_set1.v", line 28, characters 2-6:
+Error:  (in proof type_set1): Attempt to save an incomplete proof
+(the proof term is not complete because of given up (admitted) goals).
+If this is really what you want to do, use Admitted in place of Qed.
+
+Leaving directory '/private/tmp/claude-501/-Users-theooltean-programming-projects-formal-verification/ca000f62-ab3e-4c5b-a3a3-6dfa9f5481b3/scratchpad/rcproj'
+[31mThe call to [dune] returned with error code 1.
+[0m

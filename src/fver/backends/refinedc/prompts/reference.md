@@ -1,188 +1,256 @@
 # RefinedC annotation reference (for fver)
 
-RefinedC verifies C functions inside Rocq (formerly Coq) using separation
-logic. You describe *what memory each argument owns* and *which pure facts
-hold*; the automation (Lithium) then proves the function is free of undefined
-behaviour: no out-of-bounds access, no use of freed or uninitialised memory,
-no null dereference, no signed overflow, no invalid pointer arithmetic.
+RefinedC verifies C functions against *refinement types* written as C2x
+attributes `[[rc::<name>("...", ...)]]` placed immediately before a function,
+a loop, a struct or a field. Every argument is a string literal. RefinedC's
+automation (Lithium) type-checks the function; whatever pure facts remain are
+handed to `solve_goal` (lia, set_solver, simplification) and then to any
+`rc::tactics` you give. The verified property is *the function is free of
+undefined behaviour and satisfies its contract*. Everything below was checked
+against RefinedC as installed; where the syntax is subtle, an example that
+verifies is given.
 
-The goal in fver is only UB-freedom. Do not try to specify what the
-function computes unless a caller needs that fact for its own safety; the
-minimum honest ownership description that makes the proof go through is
-the right answer.
+Two syntaxes coexist and must not be mixed:
 
-> This reference was written without access to a RefinedC install. Where it
-> disagrees with the `examples/` directory of the RefinedC repository, the
-> repository wins. The checker's error output is authoritative.
+- **annotation syntax** inside attribute strings: `int<i32>`, `&own<T>`,
+  `array<i32, {...}>`, `x @ T`, `∃ r. T`;
+- **Coq syntax** inside braces `{...}`: `int i32`, `&own ty`, `x @ int i32`,
+  `l `at_type` int i32`, `replicate n (uninit (it_layout i32))`,
+  `n ≤ max_int i32`. Braces are the only way to write arithmetic, list
+  functions and Coq propositions. Writing annotation syntax such as
+  `int<i32>` inside braces makes Rocq reject the generated spec.
 
 ## 1. Where annotations go
 
-Annotations are C2x attributes `[[rc::NAME("arg", "arg", ...)]]`. Every
-argument is a string literal. Attributes are placed:
+```c
+#include <stddef.h>
+#include <refinedc.h>          // always present; the harness adds it if missing
 
-- immediately before a function definition or prototype (contract);
-- immediately before a `for`, `while` or `do` loop (loop invariant);
-- immediately before a `struct` definition or field (data-structure types);
-- immediately before a global variable.
+[[rc::parameters("n : nat")]]  // function attributes: contiguous block, no blank lines,
+[[rc::args("n @ int<size_t>")]]//   directly above the definition (or a prototype)
+[[rc::returns("void")]]
+void f(size_t n) {
+  [[rc::exists("i : nat")]]    // loop attributes: directly above for/while/do
+  [[rc::inv_vars("i : i @ int<size_t>")]]
+  [[rc::constraints("{i ≤ n}")]]
+  for (size_t i = 0; i < n; i++) { }
+}
+```
 
-The file must `#include <refinedc.h>`; fver adds the include for you.
+Struct annotations go *after* the `struct` keyword, before the tag, and each
+field carries `rc::field`:
 
-## 2. Types
+```c
+struct
+[[rc::refined_by("xs : {list Z}")]]
+buf {
+  [[rc::field("&own<array<i32, {xs `at_type` int i32}>>")]]
+  int *data;
+  [[rc::field("{length xs} @ int<size_t>")]]
+  size_t len;
+};
+```
+A value of that struct then has type `xs @ buf`, and a pointer to it
+`b @ &own<xs @ buf>`.
 
-| Syntax | Meaning |
+Attributes of the same kind may be repeated; the arguments are concatenated
+in order. Attributes may sit on a prototype instead of the definition:
+that is how contracts of already-verified callees and of external functions
+(libc) are supplied to you, and calls are checked against them.
+
+## 2. Types (annotation syntax)
+
+| Type | Meaning |
 |---|---|
-| `int<i32>`, `int<u8>`, `int<i64>`, `int<u64>`, `int<size_t>`, `int<uintptr_t>`, `int<char_it>` | an integer of that C type, any value in range |
-| `n @ int<i32>` | an integer whose mathematical value (a Coq `Z`) is `n` |
-| `boolean<bool_it>`, `b @ boolean<bool_it>` | a boolean |
-| `void` | the unit result |
+| `int<it>` | an integer of C type `it`: `i8 i16 i32 i64 u8 u16 u32 u64 size_t ssize_t`; also `builtin_boolean` for `_Bool` |
+| `v @ int<it>` | the integer whose mathematical value is `v` (a Coq `Z`, or a `nat` parameter) |
+| `void` | the return type of a `void` function |
 | `&own<T>` | an owned (exclusive, writable) pointer to memory of type `T` |
-| `&shr<T>` | a shared (read-only) pointer to `T` |
-| `p @ &own<T>` | the owned pointer whose location is the Coq variable `p : loc` |
+| `&shr<T>` | a shared read-only pointer to memory of type `T` |
+| `p @ &own<T>` / `p @ &shr<T>` | the same, naming the location `p : loc` so `rc::ensures` can talk about it |
+| `array<ly, {tys}>` | an array whose *elements have layout* `ly` (an int type such as `i32`, `u8`, `size_t`, or `{layout_of struct_x}`, or `{it_layout i32}`) and whose element *types* are the Coq list `tys` (one `type` per element) |
+| `xs @ name` | a value of annotated struct `name` refined by `xs` (the `rc::refined_by` variables) |
+| `optional<T>` | either `T` or `null` (e.g. a pointer that may be NULL); `optional<T, {null}>` explicitly |
 | `null` | the null pointer |
-| `optional<T, null>` | either `T` or null (use `optional<&own<T>, null>` for nullable pointers) |
-| `array<int<i32>, {tys}>` | a contiguous array whose element *types* are the Coq list `tys`; each element has the layout of `int<i32>` |
-| `array<int<i32>, {replicate n (uninit (it_layout i32))}>` | `n` uninitialised ints |
-| `array<int<i32>, {xs `at_type` int<i32>}>` | ints whose values are the list `xs : list Z` |
-| `uninit<{it_layout i32}>` | uninitialised memory with that layout |
-| `any<{ly}>` | some value of layout `ly`, contents unknown |
-| `struct<struct_name, T1, T2, ...>` | a struct with those field types, in declaration order |
-| `∃ x. T` | a type with an existentially quantified Coq variable (e.g. `∃ n. n @ int<i32>`) |
-| `T & {P}` | `T` together with a pure Coq proposition `P` about its refinements |
-| `place<p>` / `value<v, T>` | rarely needed; a location / a specific value |
+| `uninit<ly>` (annotation) / `uninit ly` (Coq) | uninitialised memory of layout `ly` |
+| `∃ r. T` | existential: some `r` such that `T`; usually written with `rc::exists` instead |
+| `T & {P}` | `T` constrained by Coq proposition `P` |
+| `function_ptr<{fn_type}>` | a function pointer with the given (Coq) function type |
 
-Inside `{ ... }` you write ordinary Coq/stdpp terms over the variables from
-`rc::parameters` and `rc::exists`. Integers are `Z`; list functions are
-`length`, `replicate`, `take`, `drop`, `<[i := x]>` (list insert), `!!`
-(lookup). Bounds on C types are `max_int i32`, `min_int i32`, `max_int u64`,
-etc. Use `%nat` when a literal must be a `nat`, and `Z.of_nat` / `Z.to_nat`
-to convert.
+Element lists for arrays, in Coq syntax inside braces:
 
-**Unicode.** RefinedC expects `≤`, `≥`, `≠`, `∃`, `∀`, `→`, `∧`, `∨`, `¬`,
-`∈`. ASCII alternatives are accepted inside Coq braces for most of them
-(`<=`, `>=`, `<>`, `->`, `/\`, `\/`, `~`), but `∃` in *types* must be the
-unicode symbol. Prefer unicode consistently.
+- `{xs `at_type` int i32}` — the elements of `xs : list Z`, each an `int i32`. This is the normal way to type an initialised array.
+- `{replicate n (uninit (it_layout i32))}` — `n` uninitialised ints.
+- `{replicate i (0 @ int i32) ++ replicate (n - i) (uninit (it_layout i32))}` — the first `i` written, the rest not (a typical loop invariant). Note `0 @ int i32` in Coq syntax.
+- `{take i xs ++ drop i ys}`, `{<[i := v]> xs}` (stdpp list insert) also work, but goals about them usually need a helper lemma.
+
+Refinement variables are declared with `rc::parameters` (universally
+quantified, in scope for the whole spec) and `rc::exists` (existentially
+quantified: on a function, for `rc::returns`/`rc::ensures` only; on a loop,
+for the whole invariant). Common Coq types: `Z` (integers), `nat` (naturals,
+use for lengths and indices), `list Z`, `loc` (a memory location), `bool`,
+`type`.
+
+`n @ int<size_t>` with `n : nat` is fine; the range facts
+`0 ≤ n ≤ max_int size_t` are available as hypotheses.
 
 ## 3. Function contracts
 
+| Attribute | Content |
+|---|---|
+| `rc::parameters("x : T", ...)` | universally quantified Coq variables |
+| `rc::args("T1", "T2", ...)` | one type per C parameter, in order; count must match |
+| `rc::requires("{P}", ...)` | preconditions, Coq propositions in braces; also `own p : T` for extra ownership |
+| `rc::exists("r : T", ...)` | existentials for the postcondition |
+| `rc::returns("T")` | type of the return value (`void` for void) |
+| `rc::ensures("own p : T", "{P}", ...)` | what holds on return: ownership handed back and facts |
+| `rc::tactics("all: try (...).")` | Ltac appended to the proof for leftover side conditions; always wrap in `try` |
+| `rc::lemmas("name")` | lemmas the automation may `apply:` |
+
+Ownership discipline: every pointer argument that the code reads or writes
+must be typed. Memory you receive as `&own<T>` disappears from the context
+when the function returns unless you hand it back with
+`rc::ensures("own p : T'")` (then `T'` describes its contents after the call,
+and callers get it back). Memory received as `&shr<T>` is automatically
+available again to the caller (no `ensures` needed) but cannot be written.
+
+Integers: arithmetic on `int<it>` must stay in range or the proof fails with
+a goal like `x + y ≤ max_int i32`. Add preconditions with `rc::requires`, or
+name the values (`x @ int<i32>`) so the goal can be stated. Casts and
+comparisons generate similar goals. `size_t` subtraction `n - i` needs
+`{i ≤ n}` somewhere in scope.
+
+Return type patterns:
+
 ```c
-[[rc::parameters("p : loc", "n : nat", "xs : {list Z}")]]
-[[rc::args("p @ &own<array<int<i32>, {xs `at_type` int<i32>}>>", "n @ int<size_t>")]]
-[[rc::requires("{n = length xs}")]]
-[[rc::returns("void")]]
-[[rc::ensures("own p : array<int<i32>, {replicate n (0 @ int<i32>)}>")]]
+[[rc::exists("r : Z")]]
+[[rc::returns("r @ int<i32>")]]
+[[rc::ensures("{-1 ≤ r}", "{r < n}")]]
+```
+```c
+[[rc::returns("{Z.min a b} @ int<i32>")]]       // exact value
+[[rc::returns("{x + 1} @ int<i32>")]]
 ```
 
-| Attribute | Purpose |
-|---|---|
-| `rc::parameters("x : T", ...)` | universally quantified Coq variables the caller chooses (`nat`, `Z`, `loc`, `{list Z}`, `bool`). Every name used elsewhere must be declared here or in `rc::exists`. |
-| `rc::args("T1", "T2", ...)` | one type per C parameter, in order. Pointer parameters get `&own<...>`/`&shr<...>`; scalar parameters usually get `x @ int<...>`. |
-| `rc::requires("C", ...)` | preconditions. `{P}` for pure facts; `own l : T` / `shr l : T` for extra ownership not attached to an argument. |
-| `rc::returns("T")` | the return type (`void`, `int<i32>`, `n @ int<i32>`, `optional<&own<T>, null>`, `∃ r. r @ int<i32>`). |
-| `rc::exists("y : T", ...)` | existentially quantified variables for the postcondition (values the function chooses). |
-| `rc::ensures("C", ...)` | postconditions: what ownership is handed back and which pure facts hold. Every `&own` argument's memory must be returned here with its final type, otherwise the caller loses it. |
-| `rc::tactics("all: try lia.")` | Rocq tactic text run on remaining pure side conditions. Useful values: `all: try lia.`, `all: try nia.`, `all: try set_solver.`, `all: try by rewrite length_replicate.` |
-| `rc::lemmas("name", ...)` | lemmas (from lemmas.v or the standard library) the solver may use. |
-
-Rules of thumb:
-
-- Ownership is linear. What comes in through `&own` must go out through
-  `rc::ensures` (`own p : ...`). Forgetting this makes the proof fail at the
-  return, or makes callers unable to use the memory afterwards.
-- `&shr` needs no `ensures`; it is duplicable.
-- A pointer that the function may read `n` elements through must have a type
-  covering `n` elements: `&own<array<int<i32>, {replicate n (...)}>>` or the
-  `at_type` form. A bare `&own<int<i32>>` covers exactly one element.
-- Signed arithmetic must be shown in range. If the code computes `a + b`
-  on `int`, you need `{a + b ≤ max_int i32}` (and the lower bound) to be
-  provable from `rc::requires`, `rc::constraints`, or the refinement types.
-- Length arguments: `n @ int<size_t>` with `n : nat` and `{n = length xs}`.
+Preconditions use `≤` `<` `=` `≠` `∧` `∨` `¬` `→` and Coq functions
+(`length xs`, `xs !! i = Some v`, `max_int i32`, `min_int i32`,
+`int_modulus size_t`). ASCII `<=` also works; `≤` is preferred.
 
 ## 4. Loop invariants
 
-Place before the loop keyword:
+Every loop needs:
 
 ```c
-[[rc::exists("i : nat")]]
-[[rc::inv_vars("i : i @ int<size_t>",
-               "p : p @ &own<array<int<i32>, {replicate i (0 @ int<i32>) ++ replicate (n - i) (uninit (it_layout i32))}>>")]]
-[[rc::constraints("{i ≤ n}")]]
-for (size_t i = 0; i < n; i++) p[i] = 0;
+[[rc::exists("i : nat")]]                          // variables that change per iteration
+[[rc::inv_vars("i : i @ int<size_t>",              // type of each C variable that changes
+               "p : p @ &own<array<i32, {...}>>")]] //   (parameters keep their arg type if omitted)
+[[rc::constraints("{i ≤ n}")]]                     // facts that hold at the loop head
+for (...) ...
 ```
 
-| Attribute | Purpose |
-|---|---|
-| `rc::exists("i : nat")` | variables the invariant quantifies over (typically the loop counter's mathematical value). |
-| `rc::inv_vars("cvar : T", ...)` | the type of each C variable *that changes in the loop or whose ownership is needed*, at the loop head. Variables not listed keep their type from before the loop. |
-| `rc::constraints("{P}", ...)` | pure facts that hold at the loop head. |
+Rules that matter:
 
-The invariant must hold on entry (with `i = 0`), be preserved by one
-iteration, and, together with the negated loop condition, imply what the
-code after the loop needs. Most failures are one of: a missing upper bound
-(`{i ≤ n}`), an array type that does not split into the written part and
-the unwritten part, or a counter typed `int<i32>` when it should be
-`int<size_t>`.
+- `inv_vars` names *C local variables or parameters* and gives their type at
+  the loop head. A parameter not listed keeps its `rc::args` type. If the
+  loop writes through a pointer, that pointer's `inv_vars` type must describe
+  the memory after `i` iterations.
+- The loop counter's bound (`{i ≤ n}`) is almost always needed; `n - i`
+  is otherwise meaningless on naturals.
+- The invariant must be re-established after each iteration; the goals you
+  get on failure say `Case distinction (if bool_decide (i < n)) -> true` for
+  the step case and `-> false` for the exit case.
+- `while` and `do` loops are annotated the same way; nested loops each get
+  their own block.
 
-## 5. Structs and globals
+## 5. Side conditions, tactics and helper lemmas
 
-```c
-[[rc::refined_by("n : nat", "cap : nat")]]
-[[rc::exists("xs : {list Z}")]]
-[[rc::constraints("{n ≤ cap}", "{length xs = cap}")]]
-struct [[rc::ptr_type("vec : ...")]] vec {
-  [[rc::field("n @ int<size_t>")]] size_t len;
-  [[rc::field("cap @ int<size_t>")]] size_t cap;
-  [[rc::field("&own<array<int<i32>, {xs `at_type` int<i32>}>>")]] int *data;
-};
+After typing, RefinedC prints unsolved goals as
+
+```
+Cannot solve side condition in function "zero" !
+Location: "file.c" [ line : col - line : col ]
+Case distinction (if bool_decide (i < n)) -> true
+Goal:
+n : nat
+...
+---------------------------------------
+(list_subequiv [i] (replicate i x ++ ...) (replicate (i + 1) x ++ ...))
 ```
 
-`rc::refined_by` names the mathematical refinement of the struct;
-`rc::field` gives each field's type; `rc::constraints` at struct level are
-invariants. A function taking such a struct writes
-`p @ &own<struct<struct_vec, ...>>` or, once the struct has a `rc::typedef`,
-the named type. Globals take `[[rc::global("T")]]`.
+Options, in order of preference:
+
+1. Strengthen the annotations so the fact follows by linear arithmetic.
+2. `[[rc::tactics("all: try (...).")]]` with a small tactic: `lia`, `nia`,
+   `exists i; split; [done|]; ...`, `have -> : (n - i = 0)%nat by lia`.
+   Every tactic line is applied to *all* remaining goals, so wrap it in
+   `try (...)`. A tactic that errors (not fails) aborts the whole proof.
+3. A helper lemma in `lemmas.v`, applied from `rc::tactics`:
+
+```coq
+From refinedc.typing Require Import typing.
+
+Section lemmas.
+  Context `{!typeG Σ}.          (* needed whenever the lemma mentions `type` *)
+
+  Lemma zero_step (x u : type) (i n : nat) :
+    (i < n)%nat →
+    list_subequiv [i] (replicate i x ++ replicate (n - i) u)
+                      (replicate (i + 1) x ++ replicate (n - (i + 1)) u).
+  Proof. ... Qed.
+End lemmas.
+```
+   then `[[rc::tactics("all: try (apply zero_step; lia).")]]`. Pure integer
+   lemmas need no Section. `max_int i32` does not reduce for `lia`; first
+   `have -> : max_int i32 = 2147483647 by vm_compute.` Do not write
+   `//@rc::import`: the harness imports `lemmas.v` for you.
+
+Facts about the goal language: `list_subequiv is l1 l2` means `length l1 =
+length l2 ∧ ∀ j, j ∉ is → l1 !! j = l2 !! j`. Hypotheses about `nat`
+parameters appear as `Z`-level facts (`i ≤ n`); `lia` handles `Z.of_nat`.
+`(0 @ int<i32>)%I` in a printed goal is the Coq term `0 @ int i32`.
 
 ## 6. Ghost statements (from refinedc.h)
 
-Statements the annotator may insert; they have no runtime effect:
+No-ops at runtime, allowed in function bodies: `rc_unfold_int(i);` (make the
+range of an integer parameter available before its first use),
+`rc_unfold(e);`, `rc_unlock(e);`, `rc_to_uninit(e);`, `rc_share(e);`,
+`rc_learn(e);`, `rc_stop(e);`. Do not remove or reorder real code around
+them.
 
-- `rc_unfold(x);` / `rc_unfold_int(x);` — ask the automation to unfold a refinement of variable `x`.
-- `rc_annot(x, "T");` — assert/convert the type of `x` to `T` at this point.
-- `rc_unlock(x);` — release a shared-to-own conversion.
+## 7. How failures read
 
-Use them sparingly; they are rarely needed for UB-freedom.
+| Message | Meaning | What to change |
+|---|---|---|
+| `Type system got stuck in function "f" in block "#k" !` with a goal containing `typed_write_end ... Shr`, `typed_read_end ... uninit`, `Goto`, `typed_if` | the ownership/typing annotations do not describe the program at that point: writing through `&shr`, reading memory typed `uninit`, a loop without an invariant | annotations, not tactics |
+| `Cannot solve side condition in function "f" !` | the program type-checks; a pure fact is left | constraints / requires, then tactics, then a lemma |
+| `[file:line:col] Frontend error.` / `Not implemented: ...` / `feature not yet supported` | the C front-end rejected the file (real source line numbers): unsupported construct or malformed attribute | fix the attribute; if the construct is unsupported, say `UNSUPPORTED:` in the Note |
+| `refinedc: internal error, uncaught exception` | a malformed attribute string crashed the parser | fix the attribute syntax |
+| `File ".../generated_spec.v", ... Error: Syntax error` | annotation syntax used inside `{...}` | write Coq inside braces |
+| `File ".../lemmas.v", ... Error:` | your lemma does not compile | fix the lemma |
 
-## 7. How checking works, and how to read failures
+Coq-level locations (`Location: "f.c" [ 134 : 21 - 134 : 26 ]`) are in
+preprocessed coordinates; the harness translates them to source lines and
+quotes the line when it can. Columns are exact.
 
-`refinedc check` translates the file, generates one Rocq proof per
-annotated function, and runs the automation. Three kinds of failure:
-
-1. **Front-end error** (`parse error`, `unknown attribute`, `unsupported`):
-   the attribute text is malformed, a name is undeclared, or the C construct
-   cannot be handled. Fix syntax; if the construct is unsupported, say so in
-   the note.
-2. **Automation stuck** (the printed goal contains a typing judgement such as
-   `◁`, `typed_...`, `find_in_context`, `Cannot find ...`): the annotations do
-   not describe the memory the code touches at that point. Repair the
-   ownership or loop types. Adding tactics does not help here.
-3. **Pure side condition remains** (the goal is arithmetic or list algebra
-   without typing judgements): add a `rc::constraints`/`rc::requires` fact
-   that makes it obvious, or add `rc::tactics("all: try lia.")`, or prove a
-   helper lemma in lemmas.v and cite it with `rc::lemmas`.
-
-A Rocq goal looks like hypotheses, a line of `====`, then the conclusion.
-Read the conclusion first.
+Unsupported by the front-end, regardless of annotations: floating point
+(any `float`/`double` in the types the file sees), `<setjmp.h>`, variadic
+functions (`va_arg`/`va_end`), casts inside integer constant expressions
+(`char b[(int)(8 * sizeof(void *))]`), inline assembly, `_Atomic`.
+Supported: `goto`, `switch`, function pointers (`function_ptr<...>`),
+unions (`rc::union_tag`), bitwise operations, `static` locals as globals.
 
 ## 8. Strict rules
 
-- Do **not** change the code. Only attributes, ghost statements and comments
-  may be added. Renaming a variable, changing `<` to `<=`, adding a check,
-  reordering statements: all rejected before the checker even runs.
-- Do **not** use `rc::trust_me`, `rc::skip`, `rc::manual_proof`, or
-  `rc::import`. fver wires lemmas.v in itself.
-- lemmas.v may not contain `Admitted`, `admit`, `Axiom`, `Parameter`,
-  `Hypothesis`, `Conjecture` or any `Unset ... Checking`.
-- Do not weaken the precondition to make the function uncallable
-  (`{False}`, `{0 = 1}`, typing every pointer as `null`). Preconditions
-  must be ones a real caller can satisfy; they become obligations on
-  callers, which fver verifies too.
-- Do not add `#include` lines.
+- Only add: attributes, ghost statements, comments. The code must otherwise
+  stay byte-for-byte the same; the harness rejects any change before the
+  checker runs.
+- Never use `rc::trust_me`, `rc::skip`, `rc::manual_proof`,
+  `rc::annot_args`, or the comment directives `//@rc::import`,
+  `//@rc::require`, `//@rc::inlined*`, `//@rc::context`, `//@rc::typedef`.
+- Never write `Admitted`, `admit`, `Axiom`, `Parameter`, `Hypothesis`,
+  `Conjecture`, `Unset ... Checking` in lemmas.v.
+- Preconditions must be ones real callers can satisfy; they become the
+  callers' obligations. An unsatisfiable `rc::requires` is rejected.
+- If the code really can exhibit undefined behaviour for inputs the callers
+  can produce, say so: a line starting with `BUG:` and the triggering input,
+  instead of forcing a proof with an unrealistic precondition.

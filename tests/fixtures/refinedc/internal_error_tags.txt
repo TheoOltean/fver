@@ -1,0 +1,34 @@
+refinedc: internal error, [31muncaught exception[m:
+          Failure("Tags definitions must be set by Tags.set_tagDefs before any use")
+          Raised at Stdlib.failwith in file "stdlib.ml", line 29, characters 17-33
+          Called from Cerb_frontend__Impl_mem.sizeof in file "memory/concrete/impl_mem.ml", line 170, characters 38-55
+          Called from Cerb_frontend__Impl_mem.offsetsof.(fun) in file "memory/concrete/impl_mem.ml", line 111, characters 23-41
+          Called from Stdlib__List.fold_left in file "list.ml", line 121, characters 24-34
+          Called from Cerb_frontend__Impl_mem.offsetsof in file "memory/concrete/impl_mem.ml", line 110, characters 10-660
+          Called from Cerb_frontend__Impl_mem.Concrete.offsetof_ival in file "memory/concrete/impl_mem.ml", line 2173, characters 18-43
+          Called from Cerb_frontend__Translation.translate_expression.(fun) in file "ocaml_frontend/generated/translation.ml", line 2689, characters 54-107
+          Called from Cerb_frontend__State.bind in file "ocaml_frontend/generated/state.ml", line 13, characters 18-23
+          Called from Cerb_frontend__State.runStateM in file "ocaml_frontend/generated/state.ml" (inlined), line 18, characters 3-9
+          Called from Cerb_frontend__Mini_pipeline.evalConstantExpressionAux.(fun) in file "ocaml_frontend/generated/mini_pipeline.ml", line 117, characters 46-120
+          Called from Cerb_frontend__Mini_pipeline.evalIntegerConstantExpression in file "ocaml_frontend/generated/mini_pipeline.ml", line 201, characters 2-74
+          Called from Cerb_frontend__Cabs_to_ail.evaluate_integer_constant_expression0.(fun) in file "ocaml_frontend/generated/cabs_to_ail.ml", line 1133, characters 6-83
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.stExpect_bind in file "ocaml_frontend/generated/state_exception.ml", line 19, characters 24-29
+          Called from Cerb_frontend__State_exception.state_except_eval in file "ocaml_frontend/generated/state_exception.ml", line 94, characters 94-99
+          Called from Cerb_backend__Pipeline.c_frontend.desugar in file "backend/common/pipeline.ml", line 202, characters 4-104
+          Called from Dune__exe__Cerb_wrapper.c_file_to_ail in file "frontend/cerb_wrapper.ml", line 89, characters 8-39
+          Called from Dune__exe__Main.run in file "frontend/main.ml", line 254, characters 16-64
+          Called from Cmdliner_term.app.(fun) in file "cmdliner_term.ml", line 22, characters 19-24
+          Called from Cmdliner_eval.run_parser in file "cmdliner_eval.ml", line 41, characters 7-16
