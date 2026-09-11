@@ -106,8 +106,8 @@ def test_callee_contract_change_invalidates_caller(tmp_path: Path, monkeypatch) 
     # Re-verify callee with a different contract (the null backend's
     # extract_spec returns the submission text, so any change is a contract change).
     new = "```c file=function.c\n/* FVER_ACCEPT v2 */\nint f(void) { return 0; }\n```\n"
-    callee.body_hash = "h-callee-2"
-    ctx.ledger.upsert_functions([callee])
+    src = ctx.ws.repo_root / "src" / "a.c"
+    src.write_text(src.read_text().replace("return x + 1;", "return x + 2;"))
     Verifier(ctx, FakeLLMClient(responses=[new]), "run2").verify_function(callee)
     st = _statuses(ctx)
     assert st["callee"] == "verified"

@@ -81,6 +81,8 @@ def _fn_dict(fn: FunctionInfo, status: str | None = None, **more: Any) -> dict[s
 
 
 def _status_of(ctx: AppContext, fn: FunctionInfo) -> str:
+    # The verifier may have refreshed the function from disk; read it back.
+    fn = ctx.ledger.get_function(fn.id) or fn
     claim = ctx.ledger.current_claim(fn.id, ctx.backend_name, ctx.target.key)
     return derive_status(fn, claim).value
 

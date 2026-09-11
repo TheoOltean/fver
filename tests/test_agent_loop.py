@@ -119,7 +119,9 @@ def test_cache_hit_skips_llm(tmp_path):
 def test_cache_key_changes_with_body(tmp_path):
     _ctx, _llm, v, (_, zero, _), _ = _setup(tmp_path, [ACCEPT])
     k1 = v.cache_key_for(v.build_task(zero))
-    zero.body_hash = "different"
+    # Edit the function on disk: build_task re-extracts it, so the hash moves.
+    src = _ctx.ws.repo_root / zero.source_path
+    src.write_text(src.read_text().replace("= 0;", "= 0 + 0;", 1))
     k2 = v.cache_key_for(v.build_task(zero))
     assert k1 != k2
 
