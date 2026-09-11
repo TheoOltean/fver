@@ -7,6 +7,7 @@ import logging
 import typer
 from rich.table import Table
 
+from fver.core.models import Claim, PropertyClass, Status
 from fver.util.log import console, setup_logging
 
 log = logging.getLogger("fver.scan")
@@ -126,6 +127,22 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True) -> dict:
                         reason = res.reasons.get(f.name) or res.tu_error or "unsupported by backend"
                         unsupported[f.id] = reason
                         ledger.mark_unsupported(f.id, backend_name, ctx.target.key, reason, run_id)
+                    else:
+                        cur = ledger.current_claim(f.id, backend_name, ctx.target.key)
+                        if cur is not None and cur.status is Status.UNSUPPORTED:
+                            ledger.record_claim(
+                                Claim(
+                                    function_id=f.id,
+                                    property_class=PropertyClass.UB_FREE,
+                                    backend=backend_name,
+                                    target_key=ctx.target.key,
+                                    status=Status.NOT_ATTEMPTED,
+                                    body_hash=f.body_hash,
+                                    cache_key="",
+                                    message="now accepted by the backend front-end",
+                                    run_id=run_id,
+                                )
+                            )
             index["unsupported"] = unsupported
             index["tu_errors"] = tu_errors
         ws.write_state("index", index)
