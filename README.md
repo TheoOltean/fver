@@ -20,7 +20,7 @@ Python 3.11+ and curl or wget; installs `uv` if it is missing and puts
 `fver` in `~/.local/bin`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/TheoOltean/fver/main/get-fver.sh | sh
+curl -fsSL https://raw.githubusercontent.com/TheoOltean/fver/dev/get-fver.sh | FVER_REF=dev sh
 ```
 
 From a local checkout instead:
@@ -41,7 +41,7 @@ for build capture, `cbmc` and `cerberus` for bug hunting, and for the
 RefinedC backend `opam`, Rocq, dune and `refinedc`. fver runs without any
 of them, but with reduced function.
 
-To pin a release instead of `main`, set `FVER_REF` (a tag or commit) before
+Development currently happens on the `dev` branch, hence `FVER_REF=dev`; once a release lands on `main` the plain one-liner (no `FVER_REF`) applies. To pin a release, set `FVER_REF` (a tag or commit) before
 piping to `sh`, e.g. `FVER_REF=v0.1.0`. To upgrade, run the one-liner again.
 
 Credentials and model: fver calls the Anthropic API. Put the key in your
