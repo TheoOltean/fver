@@ -1,0 +1,3 @@
+Axioms:
+propositional_extensionality : ∀ P Q : Prop, P ↔ Q → P = Q
+functional_extensionality_dep : ∀ (A : Type) (B : A → Type) (f g : ∀ x : A, B x), (∀ x : A, f x = g x) → f = g

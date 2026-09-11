@@ -1,0 +1,12 @@
+running tests...
+src/buf.c:20:12: runtime error: signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'
+    #0 0x1 in add src/buf.c:20
+    #1 0x2 in main tests/t.c:5
+=================================================================
+==1234==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602 at pc 0x1 bp 0x2 sp 0x3
+WRITE of size 1 at 0x602 thread T0
+    #0 0x10 in copy /repo/src/buf.c:12
+    #1 0x11 in main /repo/tests/t.c:7
+0x602 is located 0 bytes to the right of 4-byte region
+SUMMARY: AddressSanitizer: heap-buffer-overflow /repo/src/buf.c:12 in copy
+==1234==ABORTING

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# fver's own state when the tool is run inside this repo
+.fver/work/
+.fver/cache/
+.fver/logs/

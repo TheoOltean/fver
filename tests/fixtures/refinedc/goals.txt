@@ -1,0 +1,12 @@
+[refinedc] Generating proofs/sum/generated_proof_sum_to.v
+[refinedc] Running dune build
+File "./proofs/sum/generated_proof_sum_to.v", line 22, characters 2-16:
+Error: Unsolved side condition in function "sum_to" at sum.c:5:22
+  n : Z
+  i : Z
+  s : Z
+  H : 0 ≤ i
+  H0 : i ≤ n
+  H1 : s = i * (i - 1) / 2
+  ============================
+  s + i ≤ max_int i32

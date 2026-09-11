@@ -1,0 +1,4 @@
+src/buf.c:20:12: undefined behaviour: UB036_exceptional_condition
+Undefined behaviour: UB043_indirection_invalid_value (at src/buf.c:12:9)
+src/buf.c:30:1: error: unsupported: computed goto
+Cerberus: elaboration done

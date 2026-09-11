@@ -1,0 +1,6 @@
+[
+  {"directory": ".", "arguments": ["clang", "-std=c11", "-Isrc", "-c", "src/util.c", "-o", "util.o"], "file": "src/util.c"},
+  {"directory": ".", "command": "clang -std=c11 -Isrc -c src/net/parser.c -o parser.o", "file": "src/net/parser.c"},
+  {"directory": ".", "arguments": ["clang", "-c", "tests/test_main.c"], "file": "tests/test_main.c"},
+  {"directory": ".", "arguments": ["clang", "-c", "src/util.c"], "file": "src/util.c"}
+]

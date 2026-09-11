@@ -1,0 +1,21 @@
+[
+  {"program": "CBMC 6.11.0"},
+  {"messageText": "Parsing /repo/src/buf.c", "messageType": "STATUS-MESSAGE"},
+  {"result": [
+    {"description": "array 'buf' upper bound in buf[i]", "property": "copy.array_bounds.1", "status": "FAILURE",
+     "sourceLocation": {"file": "/repo/src/buf.c", "function": "copy", "line": "12", "column": "9"},
+     "trace": [
+       {"stepType": "assignment", "lhs": "n", "value": {"data": "5"}, "sourceLocation": {"file": "/repo/src/buf.c", "line": "9"}},
+       {"stepType": "assignment", "lhs": "i", "value": {"data": "4"}, "sourceLocation": {"file": "/repo/src/buf.c", "line": "11"}},
+       {"stepType": "failure", "reason": "array 'buf' upper bound in buf[i]", "sourceLocation": {"file": "/repo/src/buf.c", "line": "12"}}
+     ]},
+    {"description": "arithmetic overflow on signed + in a + b", "property": "add.overflow.1", "status": "FAILURE",
+     "sourceLocation": {"file": "src/buf.c", "function": "add", "line": "20"},
+     "trace": [{"stepType": "assignment", "lhs": "a", "value": {"data": "2147483647"}}]},
+    {"description": "unwinding assertion loop 0", "property": "copy.unwind.0", "status": "FAILURE",
+     "sourceLocation": {"file": "/repo/src/buf.c", "function": "copy", "line": "11"}},
+    {"description": "dereference failure: pointer NULL in *p", "property": "copy.pointer_dereference.3", "status": "SUCCESS",
+     "sourceLocation": {"file": "/repo/src/buf.c", "function": "copy", "line": "12"}}
+  ]},
+  {"cProverStatus": "failure"}
+]
