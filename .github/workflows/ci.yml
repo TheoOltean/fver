@@ -26,6 +26,7 @@ jobs:
       - run: uv venv --python 3.11 .venv
       - run: uv pip install -e ".[dev]"
       - run: .venv/bin/ruff check src tests
+      - run: .venv/bin/mypy src
       - run: .venv/bin/python -m pytest -q
 
   release:
@@ -44,6 +45,7 @@ jobs:
       - run: uv venv --python ${{ matrix.python }} .venv
       - run: uv pip install -e ".[dev]"
       - run: .venv/bin/ruff check src tests
+      - run: .venv/bin/mypy src
       - run: .venv/bin/ruff format --check src tests
       - run: .venv/bin/python -m pytest -q
       - name: shellcheck installers

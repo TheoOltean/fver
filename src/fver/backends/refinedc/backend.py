@@ -290,8 +290,8 @@ class RefinedCBackend:
         for m in self.defines:
             flags.append(facts.DEFINE_FLAG_FMT.format(macro=m))
         if self.posix_shims:
-            for d in self._shim_dirs():
-                flags.append(facts.INCLUDE_FLAG_FMT.format(dir=str(d)))
+            for shim in self._shim_dirs():
+                flags.append(facts.INCLUDE_FLAG_FMT.format(dir=str(shim)))
         return flags
 
     def _shim_dirs(self) -> list[Path]:
@@ -513,19 +513,19 @@ class RefinedCBackend:
             progressed = False
             n_copy_lines = text.count("\n") + 1
             cpp_map: dict[int, int] | None = None
-            for e in errors:
-                same_file = Path(e.file).name in (dest.name, src.name)
-                if not same_file or e.line is None:
-                    tu_error = f"{Path(e.file).name}:{e.line}: {e.message}"
+            for err in errors:
+                same_file = Path(err.file).name in (dest.name, src.name)
+                if not same_file or err.line is None:
+                    tu_error = f"{Path(err.file).name}:{err.line}: {err.message}"
                     break
                 # The line may be a real source line or a physical line of the
                 # preprocessed output (RefinedC mixes both); try both readings.
                 candidates: list[int] = []
-                if e.line <= n_copy_lines:
-                    candidates.append(e.line)
+                if err.line <= n_copy_lines:
+                    candidates.append(err.line)
                 if cpp_map is None:
                     cpp_map = self._cpp_map_for(dest, tu, repo_root)
-                mapped = cpp_map.get(e.line)
+                mapped = cpp_map.get(err.line)
                 if mapped is not None and mapped not in candidates:
                     candidates.append(mapped)
                 handled = False
@@ -536,7 +536,7 @@ class RefinedCBackend:
                         a, b = ranges[hit.name]
                         if hit.name in by_name:
                             supported[hit.name] = False
-                        reasons[hit.name] = f"line {c - offset}: {e.message}"
+                        reasons[hit.name] = f"line {c - offset}: {err.message}"
                         stubbed.add(hit.name)
                         text = ann.stub_definition(text, a, b)
                         stubbed_ranges.append((a, b))
@@ -556,7 +556,7 @@ class RefinedCBackend:
                         stubbed_ranges.append((a, b))
                         if name in by_name:
                             supported[name] = False
-                            reasons[name] = f"line {c - offset}: {e.message}"
+                            reasons[name] = f"line {c - offset}: {err.message}"
                             stubbed.add(name)
                         handled = True
                         break
@@ -570,7 +570,7 @@ class RefinedCBackend:
                         a, b = ranges[hit.name]
                         blanked.add(hit.name)
                         reasons[hit.name] = reasons.get(hit.name, "") + (
-                            f"; prototype also rejected: {e.message}"
+                            f"; prototype also rejected: {err.message}"
                         )
                         text = ann.blank_lines(text, a, b)
                         handled = True
@@ -578,7 +578,7 @@ class RefinedCBackend:
                 if handled:
                     progressed = True
                     continue
-                tu_error = f"{Path(e.file).name}:{e.line}: {e.message}"
+                tu_error = f"{Path(err.file).name}:{err.line}: {err.message}"
                 break
             if tu_error is not None or not progressed:
                 break
