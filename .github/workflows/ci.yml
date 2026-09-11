@@ -1,15 +1,38 @@
 name: ci
 
+# Budget-conscious: a push to main runs ONE small job (Linux, one Python).
+# The cross-platform matrix and the installer test run only for version
+# tags (v1.2.3) or when triggered by hand.
 on:
   push:
     branches: [main]
     tags: ["v*"]
-  pull_request:
+    paths-ignore: ["**.md", "PLAN.md", "docs/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: tests (${{ matrix.os }}, py${{ matrix.python }})
+  quick:
+    name: tests (linux, py3.11)
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.11 .venv
+      - run: uv pip install -e ".[dev]"
+      - run: .venv/bin/ruff check src tests
+      - run: .venv/bin/python -m pytest -q
+
+  release:
+    name: release checks (${{ matrix.os }}, py${{ matrix.python }})
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -23,22 +46,12 @@ jobs:
       - run: .venv/bin/ruff check src tests
       - run: .venv/bin/ruff format --check src tests
       - run: .venv/bin/python -m pytest -q
-
-  installer:
-    name: get-fver.sh (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - name: shellcheck
+      - name: shellcheck installers
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y shellcheck >/dev/null
           shellcheck -s sh get-fver.sh install.sh
-      - name: install from this checkout the way users will
+      - name: install the way users will and smoke-run
         env:
           FVER_REPO: file://${{ github.workspace }}
           FVER_REF: ${{ github.sha }}
@@ -46,10 +59,6 @@ jobs:
           sh get-fver.sh
           export PATH="$HOME/.local/bin:$PATH"
           fver --version
-          fver --help >/dev/null
-      - name: smoke-run on a tiny C project with the null backend
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
           mkdir -p /tmp/smoke/src && cd /tmp/smoke
           printf 'int add(int a, int b) { return a + b; }\nint main(void) { return add(1, 2); }\n' > src/m.c
           fver init --backend null
