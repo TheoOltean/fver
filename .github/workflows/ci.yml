@@ -65,6 +65,7 @@ jobs:
           printf 'int add(int a, int b) { return a + b; }\nint main(void) { return add(1, 2); }\n' > src/m.c
           fver init --backend null
           fver scan
-          printf '["```c file=function.c\\n/* FVER_ACCEPT */\\nint f(void){return 0;}\\n```"]' > .fver/fake.json
+          # one scripted reply per function in the smoke project (add, main)
+          printf '["```c file=function.c\\n/* FVER_ACCEPT */\\nint f(void){return 0;}\\n```", "```c file=function.c\\n/* FVER_ACCEPT */\\nint f(void){return 0;}\\n```"]' > .fver/fake.json
           FVER_FAKE_LLM=.fver/fake.json fver verify --parallel 1
           fver status
