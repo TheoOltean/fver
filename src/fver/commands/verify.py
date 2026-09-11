@@ -72,10 +72,14 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
     placed: set[str] = set()
     verified: dict[str, bool] = {}
 
-    def is_verified(fn: FunctionInfo) -> bool:
+    def skip(fn: FunctionInfo) -> bool:
+        """Verified callees need no work; unsupported ones cannot be helped."""
         if fn.id not in verified:
             claim = ctx.ledger.current_claim(fn.id, backend, tk)
-            verified[fn.id] = claim is not None and claim.status is Status.VERIFIED
+            verified[fn.id] = claim is not None and claim.status in (
+                Status.VERIFIED,
+                Status.UNSUPPORTED,
+            )
         return verified[fn.id]
 
     def resolve(caller: FunctionInfo, name: str) -> FunctionInfo | None:
@@ -96,7 +100,7 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
             if callee_name == fn.name:
                 continue
             callee = resolve(fn, callee_name)
-            if callee is None or is_verified(callee):
+            if callee is None or skip(callee):
                 continue
             visit(callee, stack)
         stack.discard(fn.id)

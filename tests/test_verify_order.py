@@ -62,3 +62,11 @@ def test_verified_callees_and_cycles_are_skipped(tmp_path):
     )
     order = order_with_dependencies(ctx, [a])
     assert [f.name for f in order] == ["b", "a"]
+
+
+def test_unsupported_callees_are_not_pulled_in(tmp_path):
+    a = _fn("a", ["u"], score=0.9)
+    u = _fn("u", score=0.2)
+    ctx = _ctx(tmp_path, [a, u])
+    ctx.ledger.mark_unsupported(u.id, "refinedc", ctx.target.key, "union", "r1")
+    assert [f.name for f in order_with_dependencies(ctx, [a])] == ["a"]
