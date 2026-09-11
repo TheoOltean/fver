@@ -145,6 +145,7 @@ class Verifier:
             raise ValueError(f"translation unit {function.tu_id} not in ledger; run `fver scan`")
         src_path = self.ws.repo_root / function.source_path
         source_text = src_path.read_text(encoding="utf-8", errors="replace")
+        function = self._refresh_from_source(function, source_text)
         lines = source_text.split("\n")
         function_text = "\n".join(lines[function.start_line - 1 : function.end_line]) + "\n"
         workdir = self.ws.backend_dir(self.backend.name) / "work" / function.id.replace(":", "_")
@@ -167,6 +168,43 @@ class Verifier:
             external_specs=externals,
             previous=previous,
         )
+
+    def _refresh_from_source(self, function: FunctionInfo, source_text: str) -> FunctionInfo:
+        """The file may have changed since the last scan (an edit, a revert).
+        Re-extract this function so lines, callees and above all the body
+        hash reflect the code on disk; update the ledger if anything moved."""
+        from dataclasses import replace
+
+        from fver.extract.functions import extract_from_source
+
+        try:
+            fresh = [
+                f
+                for f in extract_from_source(source_text, function.source_path, function.tu_id)
+                if f.name == function.name
+            ]
+        except Exception:  # noqa: BLE001 - extraction trouble: keep the indexed view
+            return function
+        if not fresh:
+            return function
+        f = fresh[0]
+        if (f.start_line, f.end_line, f.body_hash, f.callees) == (
+            function.start_line,
+            function.end_line,
+            function.body_hash,
+            function.callees,
+        ):
+            return function
+        updated = replace(
+            function,
+            start_line=f.start_line,
+            end_line=f.end_line,
+            body_hash=f.body_hash,
+            signature=f.signature,
+            callees=list(f.callees),
+        )
+        self.ledger.upsert_functions([updated])
+        return updated
 
     def cache_key_for(self, task: FunctionTask) -> str:
         return make_cache_key(
