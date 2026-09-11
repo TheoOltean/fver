@@ -38,6 +38,8 @@ _COMMAND_MODULES = [
     "fver.commands.report",
     "fver.commands.clean",
     "fver.commands.config_cmd",
+    "fver.commands.agent_cmds",
+    "fver.commands.mcp_cmd",
 ]
 
 

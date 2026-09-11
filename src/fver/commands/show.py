@@ -36,10 +36,26 @@ def register(app: typer.Typer) -> None:
         file: str | None = typer.Option(
             None, "--file", "-f", help="Repo-relative source path, to disambiguate."
         ),
+        as_json: bool = typer.Option(False, "--json", help="Emit one JSON object."),
     ) -> None:
         """Details for one function: status, claim history, assumptions, proofs, findings, callers."""
         ctx = AppContext.load(need_backend=False)
         try:
+            if as_json:
+                import json
+
+                from fver.agent import protocol
+
+                try:
+                    typer.echo(
+                        json.dumps(
+                            protocol.show(ctx, ident, file), indent=2, sort_keys=True, default=str
+                        )
+                    )
+                except protocol.ProtocolError as e:
+                    err_console.print(f"[red]{e}[/]")
+                    raise typer.Exit(code=1) from None
+                return
             fn = _resolve(ctx, ident, file)
             if fn is None:
                 raise typer.Exit(code=1)

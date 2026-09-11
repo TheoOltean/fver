@@ -22,6 +22,8 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | `backends/null.py` | A fake backend for tests and pipeline dry runs | yes (trivially) |
 | `hunters/` | Bug finders: CBMC, Cerberus interpreter, sanitizers. Produce `Finding`s | no |
 | `agent/` | Anthropic client, prompt assembly, the propose -> check -> repair loop, retrieval of examples, budget, cheating detection | only via `Backend` |
+| `agent/protocol.py` | The agent protocol: task packaging, check, next, changed as dicts; shared by CLI and MCP | only via `Backend` |
+| `mcp/server.py` | MCP server over the protocol (`fver mcp`) | no |
 | `agent/invalidate.py` | Stale-proof tracking: explicit STALE claims when a body, callee contract, external spec or tool version changed; caller invalidation after a contract change | only via `Backend` |
 | `commands/` | One module per subcommand, each with `register(app)` | via AppContext |
 | `cli.py` | Typer app; imports command modules | no |
@@ -74,6 +76,19 @@ the build (their claim and finding history stays). Build captures are kept
 under `.fver/work/compile_commands.json`; a capture that compiled nothing
 (build already up to date) reuses the previous good one so function ids stay
 stable across scans.
+
+## External provers (session mode)
+
+`agent/protocol.py` exposes the loop's building blocks as functions returning
+dicts: `reference`, `task`, `check`, `next_functions`, `changed`, `status`,
+`show`, `scan`, `hunt`. `Verifier.attempt_submission` is the single
+guardrail -> check -> audit -> save step used by both the API loop and
+`Verifier.submit` (external prover; zero LLM cost, `extra["prover"] =
+"external"`). `commands/agent_cmds.py` (`fver task|check|next|changed`) and
+`mcp/server.py` (`fver mcp`, stdio, optional dependency `fver[mcp]`) are
+thin wrappers over the protocol, so a Claude Code session, a script and the
+built-in loop are judged identically. `.claude/skills/fver/SKILL.md` is the
+workflow for a session.
 
 ## Offline trials
 

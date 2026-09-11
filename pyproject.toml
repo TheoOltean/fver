@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
+mcp = ["mcp>=1.2"]
 
 [project.scripts]
 fver = "fver.cli:main"

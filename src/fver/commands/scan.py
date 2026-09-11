@@ -38,7 +38,7 @@ def register(app: typer.Typer) -> None:
             ctx.close()
 
 
-def run_scan(ctx, preprocess: bool = True, translate: bool = True) -> dict:
+def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool = False) -> dict:
     """The scan pipeline. Returns the index dict that was written to work/index.json."""
     from fver.build.compile_commands import capture_build
     from fver.build.preprocess import preprocess_all
@@ -61,7 +61,8 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True) -> dict:
         for w in cap.warnings:
             log.warning(w)
         tus = cap.tus
-        console.print(f"[bold]Build:[/bold] {len(tus)} translation unit(s) from {cap.source}")
+        if not quiet:
+            console.print(f"[bold]Build:[/bold] {len(tus)} translation unit(s) from {cap.source}")
 
         # 2. preprocess
         pp_errors: dict[str, str] = {}
@@ -156,10 +157,11 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True) -> dict:
             index["stale"] = [s.function.id for s in stale]
             ws.write_state("index", index)
 
-        _print_summary(
-            tus, pp_errors, functions, unsupported, translate and ctx.backend is not None
-        )
-        if stale:
+        if not quiet:
+            _print_summary(
+                tus, pp_errors, functions, unsupported, translate and ctx.backend is not None
+            )
+        if stale and not quiet:
             console.print(
                 f"[magenta]{len(stale)} previously verified function(s) are now stale[/] "
                 "(code or a callee contract changed); `fver verify` will redo them."

@@ -70,8 +70,81 @@ fver show parse_header
 fver report        # full markdown report under .fver/reports/
 ```
 
-`fver verify` options worth knowing: `--function NAME`, `--file PATH`,
+`fver verify` (API mode) options worth knowing: `--function NAME`, `--file PATH`,
 `--limit N`, `--max-usd X`, `--dry-run`, `--retry-unresolved`, `--recheck`.
+
+## Two ways to run the prover
+
+**API mode.** `fver verify` calls the Anthropic API itself: fully
+autonomous, parallel, budgeted per function and per run, results cached.
+Needs a key in your user-level config. Best for sweeping a whole codebase.
+
+**Session mode.** A Claude Code session (or any MCP client, or a script,
+or you) acts as the prover. fver keeps the parts that must not be left to
+the model: packaging the task, the guardrails, the proof checker, the
+audit and the ledger. No API key; the cost is your Claude subscription;
+it is interactive and works while you edit code. Best for day-to-day
+development and for functions the autonomous loop could not close.
+
+Both modes record into the same ledger; `fver show <fn>` says which prover
+produced a proof.
+
+## Use from Claude Code
+
+Register the MCP server once (from anywhere; it opens the `.fver/` of the
+repository the session is in):
+
+```sh
+uv tool install --force 'fver[mcp]'      # or: pipx install 'fver[mcp]'
+claude mcp add fver -- fver mcp
+```
+
+or put this in the repository's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "fver": { "command": "fver", "args": ["mcp"] }
+  }
+}
+```
+
+Tools: `fver_reference`, `fver_next`, `fver_task`, `fver_check`,
+`fver_changed`, `fver_status`, `fver_show`, `fver_scan`, `fver_hunt`. A
+skill describing the workflow ships in `.claude/skills/fver/SKILL.md`; copy
+it into your repository's `.claude/skills/` (or `~/.claude/skills/`) so
+`/fver` is available in any session.
+
+The same protocol is available as plain commands, so a session without MCP
+can drive it through the shell:
+
+```sh
+fver next                                   # what to prove, callees first
+fver task luaZ_read > .fver/scratch/task.md # the packet: reference, code, contracts
+fver check luaZ_read --submission .fver/scratch/luaZ_read.c   # exit 0 = verified
+fver changed                                # after edits: which proofs went stale
+```
+
+To have proofs checked as you edit, add a cheap hook to `.claude/settings.json`
+(it re-indexes without running the backend; keep it that way):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$(jq -r .tool_input.file_path)\" in *.c|*.h) fver changed;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 ## What gets proven
 

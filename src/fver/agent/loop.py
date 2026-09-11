@@ -94,6 +94,24 @@ class RunBudgetExceeded(RuntimeError):
     pass
 
 
+@dataclass
+class AttemptOutcome:
+    """What happened to one submission. `kind` is one of:
+    verified, bug, tool_error, guardrail, audit_failed, feedback (checker
+    rejected; `feedback` says why). `claim` is set for the terminal kinds
+    (verified, bug, tool_error) and is NOT yet recorded in the ledger."""
+
+    kind: str
+    feedback: str = ""
+    result: CheckResult | None = None
+    violations: list[str] = field(default_factory=list)
+    claim: Claim | None = None
+
+    @property
+    def terminal(self) -> bool:
+        return self.kind in ("verified", "bug", "tool_error")
+
+
 # ---------------------------------------------------------------------------
 # Verifier
 # ---------------------------------------------------------------------------
@@ -207,6 +225,150 @@ class Verifier:
                     )
         return violations
 
+    # -- one attempt: guardrail -> check -> audit -> save --------------------------------
+
+    def attempt_submission(
+        self,
+        task: FunctionTask,
+        key: str,
+        submission: Submission,
+        attempt: int,
+        remaining: int,
+        cost: Cost,
+        **claim_extra: Any,
+    ) -> AttemptOutcome:
+        """Judge one submission for `task`. Shared by the API-driven loop and
+        the external-prover commands (`fver check`, MCP). Saves accepted
+        proofs and failed attempts to disk; returns claims without recording
+        them so the caller controls cost accounting and ordering."""
+        f = task.function
+        violations = self._guardrail(submission)
+        if violations:
+            fb = prompts.build_guardrail_message(violations, attempt, remaining)
+            store.save_attempt(self.ws, task, attempt, submission, fb)
+            return AttemptOutcome("guardrail", fb, violations=violations)
+
+        result = self.backend.check(task, submission, self.cfg.budget.checker_timeout_seconds)
+        cost.checker_runs += 1
+
+        if result.outcome is CheckOutcome.TOOL_ERROR:
+            msg = "checker failed: " + (result.feedback or result.stderr)[:500]
+            claim = self._claim(task, Status.UNRESOLVED, key, cost, msg, result, **claim_extra)
+            return AttemptOutcome("tool_error", result.feedback, result, claim=claim)
+
+        if result.outcome is CheckOutcome.BUG:
+            self.ledger.record_finding(
+                Finding(
+                    function_id=f.id,
+                    source_path=f.source_path,
+                    line=f.start_line,
+                    kind="undefined_behaviour",
+                    tool=self.backend.name,
+                    message=result.feedback[:2000],
+                    witness=result.witness,
+                    run_id=self.run_id,
+                )
+            )
+            store.save_attempt(self.ws, task, attempt, submission, result.feedback)
+            claim = self._claim(
+                task,
+                Status.BUG_FOUND,
+                key,
+                cost,
+                "bug found: " + result.feedback[:300],
+                result,
+                **claim_extra,
+            )
+            return AttemptOutcome("bug", result.feedback, result, claim=claim)
+
+        if result.outcome is CheckOutcome.OK:
+            audit = self.backend.audit(task, result)
+            if not audit.passed:
+                fb = prompts.build_audit_failure_message(audit.violations, attempt, remaining)
+                store.save_attempt(self.ws, task, attempt, submission, fb)
+                return AttemptOutcome("audit_failed", fb, result, violations=audit.violations)
+            extra_assumptions = set(audit.assumptions) | set(
+                store.unverified_callee_assumptions(
+                    self.ledger, self.backend, task.function, self.target.key
+                )
+            )
+            if extra_assumptions:
+                result.assumptions = sorted(set(result.assumptions) | extra_assumptions)
+            if not result.tool_versions:
+                result.tool_versions = dict(self._tool_versions)
+            if result.proof_hash is None:
+                result.proof_hash = submission.content_hash()
+            old_contract = (
+                self.backend.extract_spec(task.previous, task.function)
+                if task.previous is not None
+                else None
+            )
+            store.save_accepted(self.ws, task, submission, result, key, self.backend.name)
+            store.cache_insert(self.ws, key, Status.VERIFIED, submission, result)
+            claim = self._claim(
+                task,
+                Status.VERIFIED,
+                key,
+                cost,
+                f"verified in {attempt} attempt(s)",
+                result,
+                **claim_extra,
+            )
+            invalidate.invalidate_dependents(
+                self.ctx,
+                task.function,
+                old_contract,
+                self.backend.extract_spec(submission, task.function),
+                self.run_id,
+            )
+            return AttemptOutcome("verified", "", result, claim=claim)
+
+        # AUTOMATION_STUCK / GOALS_REMAIN / FRONTEND_ERROR / GUARDRAIL: feed back.
+        fb = prompts.build_feedback_message(result, attempt, remaining)
+        store.save_attempt(self.ws, task, attempt, submission, fb)
+        return AttemptOutcome("feedback", fb, result)
+
+    # -- external prover: one submission judged and recorded -------------------------
+
+    def submit(self, function: FunctionInfo, submission: Submission) -> AttemptOutcome:
+        """Judge a submission written by an external prover (a Claude Code
+        session, a script, a human) and record the outcome in the ledger the
+        same way the internal loop would. LLM cost is zero; the claim carries
+        extra["prover"] = "external"."""
+        task = self.build_task(function)
+        key = self.cache_key_for(task)
+        attempt = self._next_attempt_number(task)
+        cost = Cost()
+        cur = self.ledger.current_claim(function.id, self.backend.name, self.target.key)
+        if cur is None or cur.status is not Status.IN_PROGRESS:
+            self.ledger.record_claim(
+                self._claim(task, Status.IN_PROGRESS, key, Cost(), "external prover started")
+            )
+        out = self.attempt_submission(task, key, submission, attempt, 0, cost, prover="external")
+        if out.claim is not None:
+            self.ledger.record_claim(out.claim)
+        else:
+            first = out.feedback.split("\n", 1)[0][:200]
+            self.ledger.record_claim(
+                self._claim(
+                    task,
+                    Status.IN_PROGRESS,
+                    key,
+                    cost,
+                    f"attempt {attempt} ({out.kind}): {first}",
+                    out.result,
+                    prover="external",
+                )
+            )
+        return out
+
+    def _next_attempt_number(self, task: FunctionTask) -> int:
+        d = self.ws.proofs_dir / task.function.source_path / task.function.name / "attempts"
+        if not d.exists():
+            return 1
+        nums = [int(p.name) for p in d.iterdir() if p.name.isdigit()]
+        return (max(nums) + 1) if nums else 1
+
     # -- the loop -------------------------------------------------------------------
 
     def verify_function(self, function: FunctionInfo) -> FunctionOutcome:
@@ -311,88 +473,34 @@ class Verifier:
                 continue
 
             submission = parsed
-            violations = self._guardrail(submission)
-            if violations:
-                last_feedback = prompts.build_guardrail_message(violations, attempt, remaining)
+            out = self.attempt_submission(task, key, submission, attempt, remaining, cost)
+            if out.kind == "guardrail":
+                last_feedback = out.feedback
                 convo.add(completion, last_feedback, f"attempt {attempt}: guardrail violation")
-                store.save_attempt(self.ws, task, attempt, submission, last_feedback)
                 continue
-
-            result = self.backend.check(task, submission, budget.checker_timeout_seconds)
-            cost.checker_runs += 1
-
-            if result.outcome is CheckOutcome.TOOL_ERROR:
-                msg = "checker failed: " + (result.feedback or result.stderr)[:500]
-                claim = self._claim(task, Status.UNRESOLVED, key, cost, msg, result)
-                return FunctionOutcome(claim, attempts=attempt)
-
-            if result.outcome is CheckOutcome.BUG:
-                self.ledger.record_finding(
-                    Finding(
-                        function_id=f.id,
-                        source_path=f.source_path,
-                        line=f.start_line,
-                        kind="undefined_behaviour",
-                        tool=self.backend.name,
-                        message=result.feedback[:2000],
-                        witness=result.witness,
-                        run_id=self.run_id,
-                    )
-                )
-                store.save_attempt(self.ws, task, attempt, submission, result.feedback)
-                claim = self._claim(
-                    task, Status.BUG_FOUND, key, cost, "bug found: " + result.feedback[:300], result
-                )
-                return FunctionOutcome(claim, attempts=attempt)
-
-            if result.outcome is CheckOutcome.OK:
-                audit = self.backend.audit(task, result)
-                if not audit.passed:
-                    last_feedback = prompts.build_audit_failure_message(
-                        audit.violations, attempt, remaining
-                    )
-                    convo.add(completion, last_feedback, f"attempt {attempt}: audit failed")
-                    store.save_attempt(self.ws, task, attempt, submission, last_feedback)
-                    continue
-                extra_assumptions = set(audit.assumptions) | set(
-                    store.unverified_callee_assumptions(
-                        self.ledger, self.backend, task.function, self.target.key
-                    )
-                )
-                if extra_assumptions:
-                    result.assumptions = sorted(set(result.assumptions) | extra_assumptions)
-                if not result.tool_versions:
-                    result.tool_versions = dict(self._tool_versions)
-                if result.proof_hash is None:
-                    result.proof_hash = submission.content_hash()
-                old_contract = (
-                    self.backend.extract_spec(task.previous, task.function)
-                    if task.previous is not None
-                    else None
-                )
-                store.save_accepted(self.ws, task, submission, result, key, self.backend.name)
-                store.cache_insert(self.ws, key, Status.VERIFIED, submission, result)
-                claim = self._claim(
-                    task, Status.VERIFIED, key, cost, f"verified in {attempt} attempt(s)", result
-                )
-                invalidate.invalidate_dependents(
-                    self.ctx,
-                    task.function,
-                    old_contract,
-                    self.backend.extract_spec(submission, task.function),
-                    self.run_id,
-                )
-                return FunctionOutcome(claim, attempts=attempt)
-
-            # AUTOMATION_STUCK / GOALS_REMAIN / FRONTEND_ERROR / GUARDRAIL: feed back.
+            if out.kind == "tool_error":
+                assert out.claim is not None
+                return FunctionOutcome(out.claim, attempts=attempt)
+            if out.kind == "bug":
+                assert out.claim is not None
+                return FunctionOutcome(out.claim, attempts=attempt)
+            if out.kind == "verified":
+                assert out.claim is not None
+                return FunctionOutcome(out.claim, attempts=attempt)
+            if out.kind == "audit_failed":
+                last_feedback = out.feedback
+                convo.add(completion, last_feedback, f"attempt {attempt}: audit failed")
+                continue
+            # feedback: checker rejected the submission
+            result = out.result
+            assert result is not None
             rank = {CheckOutcome.GOALS_REMAIN: 3, CheckOutcome.AUTOMATION_STUCK: 2}.get(
                 result.outcome, 1
             )
             if best is None or rank >= best[0]:
                 best = (rank, submission)
-            last_feedback = prompts.build_feedback_message(result, attempt, remaining)
+            last_feedback = out.feedback
             convo.add(completion, last_feedback, f"attempt {attempt}: {result.outcome.value}")
-            store.save_attempt(self.ws, task, attempt, submission, last_feedback)
 
         msg = f"unresolved after {attempt} attempt(s)"
         if last_feedback:
