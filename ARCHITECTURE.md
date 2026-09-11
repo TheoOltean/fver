@@ -10,7 +10,7 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | Module | Owns | Knows about backend? |
 |---|---|---|
 | `core/models.py` | Domain vocabulary: Target, TranslationUnit, FunctionInfo, Claim, Finding, Status, Cost | no |
-| `core/config.py` | `.fver/config.toml` schema (pydantic), loading, saving | no (opaque `[backend.<name>]` table) |
+| `core/config.py` | `.fver/config.toml` schema (pydantic), loading, saving. Run-shaping defaults live here (`[verify]`, `[budget]`, `[model]`, `[hunters]`); CLI flags are one-run overrides and default to None so the config wins | no (opaque `[backend.<name>]` table) |
 | `core/workspace.py` | `.fver/` layout, write guard (refuses to write outside `.fver/`) | no |
 | `core/context.py` | `AppContext.load()` = workspace + config + ledger + backend | constructs it via registry only |
 | `build/` | Build capture: compile_commands.json (bear/cmake/fallback), per-TU preprocessing, target detection | no |
@@ -26,6 +26,7 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | `mcp/server.py` | MCP server over the protocol (`fver mcp`) | no |
 | `agent/invalidate.py` | Stale-proof tracking: explicit STALE claims when a body, callee contract, external spec or tool version changed; caller invalidation after a contract change | only via `Backend` |
 | `commands/` | One module per subcommand, each with `register(app)` | via AppContext |
+| `commands/docs.py` | `fver docs` and the `.fver/README.md` that `fver init` writes: layout, command reference generated from the Typer app, config reference from the pydantic defaults, prover workflow (mirrored by `.claude/skills/fver/SKILL.md`, test-enforced) | no |
 | `cli.py` | Typer app; imports command modules | no |
 
 ## Data flow

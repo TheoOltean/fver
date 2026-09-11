@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 from typer.testing import CliRunner
 
 from fver.cli import app
 from fver.commands import clean as clean_cmd
 from fver.commands import config_cmd, doctor, hunt
+from fver.commands import docs as docs_cmd
 from fver.core.config import FverConfig, HuntersConfig, load_config
 from fver.core.models import Finding, FunctionInfo, Status, Target, TranslationUnit
 from fver.core.workspace import Workspace
@@ -34,7 +37,11 @@ def test_init_creates_layout_and_detects_makefile(repo):
     ws = Workspace.open(repo)
     for d in ("proofs", "external", "work", "backend", "cache", "logs"):
         assert (ws.root / d).is_dir()
-    assert (ws.root / ".gitignore").exists() and (ws.root / "README.md").exists()
+    assert (ws.root / ".gitignore").exists()
+    # The workspace README documents every command, every config key and the workflow.
+    readme = (ws.root / "README.md").read_text()
+    for needle in ("### `fver check`", "`--submission`", "[verify]", "next_limit", "## Goal"):
+        assert needle in readme
     cfg = load_config(repo)
     assert cfg.project.name == "proj" and cfg.project.backend == "refinedc"
     assert cfg.build.capture_command == "bear -- make"
@@ -76,6 +83,9 @@ def test_config_get_set_roundtrip(repo):
     assert load_config(repo).model.effort == "xhigh"
     assert runner.invoke(app, ["config", "set", "hunters.cbmc", "false"]).exit_code == 0
     assert load_config(repo).hunters.cbmc is False
+    assert runner.invoke(app, ["config", "set", "verify.limit", "5"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "verify.follow_callees", "false"]).exit_code == 0
+    assert load_config(repo).verify.limit == 5 and load_config(repo).verify.follow_callees is False
     assert (
         runner.invoke(app, ["config", "set", "budget.max_usd_per_function", "2.5"]).exit_code == 0
     )
@@ -99,6 +109,26 @@ def test_config_get_set_roundtrip(repo):
     assert runner.invoke(app, ["config", "get", "nope.key"]).exit_code == 1
     assert str(repo / ".fver" / "config.toml") in runner.invoke(app, ["config", "path"]).output
     assert "[project]" in runner.invoke(app, ["config", "show"]).output
+
+
+def test_docs_command_prints_and_refreshes_readme(repo):
+    assert runner.invoke(app, ["init"]).exit_code == 0
+    r = runner.invoke(app, ["docs"])
+    assert r.exit_code == 0 and "### `fver verify`" in r.output and "[budget]" in r.output
+    readme = repo / ".fver" / "README.md"
+    readme.write_text("stale")
+    r = runner.invoke(app, ["docs", "--write"])
+    assert r.exit_code == 0 and readme.read_text() == docs_cmd.render_docs()
+
+
+def test_prover_workflow_matches_claude_skill():
+    """The skill shipped for Claude Code and the workflow written into .fver/README.md
+    must say the same thing."""
+    skill = pathlib.Path(__file__).resolve().parents[1] / ".claude" / "skills" / "fver" / "SKILL.md"
+    if not skill.exists():
+        pytest.skip("skill file not in this checkout")
+    body = skill.read_text().split("---", 2)[2].lstrip()
+    assert body == docs_cmd.PROVER_WORKFLOW
 
 
 def test_parse_value():

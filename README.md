@@ -70,8 +70,19 @@ fver show parse_header
 fver report        # full markdown report under .fver/reports/
 ```
 
-`fver verify` (API mode) options worth knowing: `--function NAME`, `--file PATH`,
-`--limit N`, `--max-usd X`, `--dry-run`, `--retry-unresolved`, `--recheck`.
+Everything that shapes a run lives in `.fver/config.toml`: which functions a
+run may take on (`[verify]`: `limit`, `retry_unresolved`, `follow_callees`,
+`next_limit`, `task_reference`), money and attempt caps (`[budget]`), the
+model (`[model]`), the bug finders (`[hunters]`). Read and write it with
+`fver config get|set|show`. Command-line flags such as `--limit`, `--max-usd`,
+`--no-deps`, `--model` exist to override the config for one run; `--dry-run`
+prints the plan and cost estimate without doing anything.
+
+`fver init` also writes `.fver/README.md`: the layout, every command with its
+options, every config key with its default, and the proving workflow, so an
+agent or a colleague working in the repository has the documentation next to
+the state. `fver docs` prints it; `fver docs --write` refreshes it after an
+upgrade.
 
 ## Two ways to run the prover
 

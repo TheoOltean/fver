@@ -10,6 +10,7 @@ fver show      details for one function
 fver report    write a full report (markdown / json)
 fver clean     remove derived state (never user files)
 fver config    get / set configuration values
+fver docs      print the command / config / workflow reference
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ _COMMAND_MODULES = [
     "fver.commands.report",
     "fver.commands.clean",
     "fver.commands.config_cmd",
+    "fver.commands.docs",
     "fver.commands.agent_cmds",
     "fver.commands.mcp_cmd",
 ]

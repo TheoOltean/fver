@@ -84,6 +84,22 @@ class BudgetConfig(BaseModel):
     parallelism: int = 2
 
 
+class VerifyConfig(BaseModel):
+    """Defaults for `fver verify`, `fver next` and `fver task`. Command-line
+    flags override these for one run."""
+
+    # Stop a run after this many functions; 0 means no limit.
+    limit: int = 0
+    # Also retry functions an earlier run left UNRESOLVED.
+    retry_unresolved: bool = False
+    # Place each function's unverified internal callees before it.
+    follow_callees: bool = True
+    # `fver next`: how many functions to list.
+    next_limit: int = 10
+    # `fver task`: include the annotation-language reference in plain output.
+    task_reference: bool = True
+
+
 class HuntersConfig(BaseModel):
     cbmc: bool = True
     cerberus: bool = True
@@ -100,6 +116,7 @@ class FverConfig(BaseModel):
     target: TargetConfig = Field(default_factory=TargetConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    verify: VerifyConfig = Field(default_factory=VerifyConfig)
     hunters: HuntersConfig = Field(default_factory=HuntersConfig)
     # Free-form per-backend settings: config.backend["refinedc"]["refinedc_bin"]
     backend: dict[str, dict[str, Any]] = Field(default_factory=dict)

@@ -33,18 +33,22 @@ def register(app: typer.Typer) -> None:
         function: str = typer.Argument(..., help="Function name or ledger id."),
         file: str | None = typer.Option(None, "--file", help="Source path, to disambiguate."),
         as_json: bool = typer.Option(False, "--json", help="Emit one JSON object."),
-        no_reference: bool = typer.Option(
-            False, "--no-reference", help="Omit the language reference (plain output only)."
+        reference: bool | None = typer.Option(
+            None,
+            "--reference/--no-reference",
+            help="Include the language reference in plain output (config: verify.task_reference).",
         ),
     ) -> None:
         """Print the proving packet for one function: reference, code, context, contracts, prompt."""
         ctx = AppContext.load(need_backend=True)
+        if reference is None:
+            reference = ctx.config.verify.task_reference
         try:
             d = protocol.task(ctx, function, file)
             if as_json:
                 _dump(d)
             else:
-                typer.echo(protocol.render_task_text(ctx, d, with_reference=not no_reference))
+                typer.echo(protocol.render_task_text(ctx, d, with_reference=reference))
         except protocol.ProtocolError as e:
             _fail(str(e))
         finally:
@@ -99,12 +103,16 @@ def register(app: typer.Typer) -> None:
 
     @app.command("next")
     def next_(
-        limit: int = typer.Option(10, "--limit", "-n", help="How many."),
+        limit: int | None = typer.Option(
+            None, "--limit", "-n", help="How many (config: verify.next_limit)."
+        ),
         file: str | None = typer.Option(None, "--file", help="Only this source file (glob)."),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """The next functions to prove, callees before callers, highest attack surface first."""
         ctx = AppContext.load(need_backend=True)
+        if limit is None:
+            limit = ctx.config.verify.next_limit
         try:
             d = protocol.next_functions(ctx, limit, file)
         finally:

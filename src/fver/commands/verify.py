@@ -123,31 +123,37 @@ def register(app: typer.Typer) -> None:
             None, "--file", help="Only functions in this source file (glob)."
         ),
         limit: int | None = typer.Option(
-            None, "--limit", "-n", help="Stop after this many functions."
+            None, "--limit", "-n", help="Stop after this many functions (config: verify.limit)."
         ),
         max_usd: float | None = typer.Option(
-            None, "--max-usd", help="Run budget in USD (overrides config)."
+            None, "--max-usd", help="Run budget in USD (config: budget.max_usd_per_run)."
         ),
-        retry_unresolved: bool = typer.Option(
-            False, "--retry-unresolved", help="Also retry UNRESOLVED functions."
+        retry_unresolved: bool | None = typer.Option(
+            None,
+            "--retry-unresolved/--no-retry-unresolved",
+            help="Also retry UNRESOLVED functions (config: verify.retry_unresolved).",
         ),
         recheck: bool = typer.Option(
             False, "--recheck", help="Re-run the checker on VERIFIED functions, no LLM."
         ),
-        no_deps: bool = typer.Option(
-            False,
-            "--no-deps",
-            help="Do not pull a function's unverified callees in front of it.",
+        deps: bool | None = typer.Option(
+            None,
+            "--deps/--no-deps",
+            help="Pull a function's unverified callees in front of it "
+            "(config: verify.follow_callees).",
         ),
         dry_run: bool = typer.Option(
             False, "--dry-run", help="Show the plan and cost estimate; do nothing."
         ),
         parallel: int | None = typer.Option(
-            None, "--parallel", "-j", help="Functions verified concurrently."
+            None,
+            "--parallel",
+            "-j",
+            help="Functions verified concurrently (config: budget.parallelism).",
         ),
-        model: str | None = typer.Option(None, "--model", help="Override the model id."),
+        model: str | None = typer.Option(None, "--model", help="Model id (config: model.model)."),
         effort: str | None = typer.Option(
-            None, "--effort", help="low | medium | high | xhigh | max"
+            None, "--effort", help="low | medium | high | xhigh | max (config: model.effort)"
         ),
         verbose: bool = typer.Option(False, "--verbose", "-v"),
     ) -> None:
@@ -158,8 +164,14 @@ def register(app: typer.Typer) -> None:
         cfg = ctx.config
         assert ctx.backend is not None
 
+        if limit is None:
+            limit = cfg.verify.limit or None
+        if retry_unresolved is None:
+            retry_unresolved = cfg.verify.retry_unresolved
+        if deps is None:
+            deps = cfg.verify.follow_callees
         selected = _select(
-            ctx, function or [], file, limit, retry_unresolved, recheck, with_deps=not no_deps
+            ctx, function or [], file, limit, retry_unresolved, recheck, with_deps=deps
         )
         if not selected:
             console.print(

@@ -162,3 +162,21 @@ def test_cli_commands_and_exit_codes(repo: Path) -> None:
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 0
     r = runner.invoke(app, ["check", "missing", "--submission", str(sub)])
     assert r.exit_code == 1
+
+
+def test_verify_section_of_config_supplies_defaults(repo: Path) -> None:
+    runner = CliRunner()
+    assert runner.invoke(app, ["config", "set", "verify.next_limit", "1"]).exit_code == 0
+    r = runner.invoke(app, ["next", "--json"])
+    assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 1
+    r = runner.invoke(app, ["next", "--json", "--limit", "5"])  # the flag still wins
+    assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 2
+    assert runner.invoke(app, ["config", "set", "verify.limit", "1"]).exit_code == 0
+    r = runner.invoke(app, ["verify", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    assert "add" in r.output and "twice" not in r.output
+    r = runner.invoke(app, ["verify", "--dry-run", "--limit", "2"])
+    assert r.exit_code == 0 and "twice" in r.output
+    assert runner.invoke(app, ["config", "set", "verify.task_reference", "false"]).exit_code == 0
+    r = runner.invoke(app, ["task", "add"])
+    assert r.exit_code == 0 and "# Task: prove `add`" in r.output and "rc::" not in r.output

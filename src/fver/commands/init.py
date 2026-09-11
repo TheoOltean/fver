@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 from rich.panel import Panel
 
+from fver.commands.docs import render_docs
 from fver.core.config import (
     CONFIG_DIR_NAME,
     CONFIG_FILE_NAME,
@@ -18,24 +19,6 @@ from fver.core.config import (
 )
 from fver.core.workspace import Workspace
 from fver.util.log import console
-
-WORKSPACE_README = """# .fver/
-
-State written by `fver`. Your source files are never modified.
-
-| Path | What | Commit it? |
-|---|---|---|
-| `config.toml` | project configuration | yes |
-| `ledger.sqlite` | what is proven, what is not, and why | yes (recommended) |
-| `proofs/` | accepted annotations and proofs, mirroring the source tree | yes |
-| `external/` | trusted specs for libc and other external functions | yes |
-| `work/` | build capture, preprocessed files, function index | no (gitignored) |
-| `backend/` | the proof backend's private project | no |
-| `cache/` | content-addressed results | no |
-| `logs/` | run logs and LLM transcripts | no |
-
-Workflow: `fver doctor` -> `fver scan` -> `fver hunt` -> `fver verify` -> `fver status`.
-"""
 
 
 def detect_build(repo_root: Path) -> tuple[BuildConfig, list[str]]:
@@ -108,7 +91,9 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
     )
     ws = Workspace.create(repo_root, cfg)
     save_config(repo_root, cfg)
-    (ws.root / "README.md").write_text(WORKSPACE_README, encoding="utf-8")
+    # Documentation for whoever (or whatever) works here next: layout, every
+    # command and option, every config key, the proving workflow.
+    (ws.root / "README.md").write_text(render_docs(), encoding="utf-8")
     console.print(Panel.fit(f"Initialised [bold]{ws.root}[/]", title="fver init"))
     for n in notes:
         console.print(f"  • {n}")
