@@ -249,3 +249,63 @@ def test_caller_checked_against_callee_contract(backend, repo, tu):
     # The spliced file must carry the prototype and not inc's body.
     spliced = Path(res.artifacts["source"]).read_text()
     assert "int inc(int x);" in spliced and spliced.count("return x + 1") == 0
+
+
+def test_target_verifies_despite_unsupported_sibling(backend, repo, tu):
+    """A varargs function in the same file must not block verifying `inc`."""
+    src = (
+        SRC
+        + "\n#include <stdarg.h>\nint va(int n, ...) { va_list ap; va_start(ap, n); va_end(ap); return n; }\n"
+    )
+    (repo / "src" / "sib.c").write_text(src)
+    tus = TranslationUnit(
+        id="sib1", source_path="src/sib.c", directory=str(repo), arguments=["cc", "-c", "src/sib.c"]
+    )
+    s, e = _lines(src, "inc")
+    fn = FunctionInfo(
+        id="sib1:inc",
+        name="inc",
+        tu_id="sib1",
+        source_path="src/sib.c",
+        start_line=s,
+        end_line=e,
+        signature="inc",
+        body_hash="hinc",
+    )
+    from fver.backends.base import FunctionTask
+
+    task = FunctionTask(
+        function=fn,
+        tu=tus,
+        target=Target(),
+        repo_root=repo,
+        workdir=backend.workspace_dir / "checks" / "sib",
+        source_text=src,
+        function_text="\n".join(src.split("\n")[s - 1 : e]) + "\n",
+        callee_specs={},
+        external_specs={},
+    )
+    res = backend.check(task, Submission(files={"function.c": INC_OK}), timeout_seconds=600)
+    assert res.outcome is CheckOutcome.OK, res.feedback
+    spliced = Path(res.artifacts["source"]).read_text()
+    assert "int va(int n, ...);" in spliced and "va_start" not in spliced
+
+
+def test_posix_includes_parse_with_shims(backend, repo, tu):
+    src = "#include <sys/types.h>\n#include <unistd.h>\n#include <sys/wait.h>\n#include <dlfcn.h>\nint g(int x) { return x; }\n"
+    (repo / "src" / "px.c").write_text(src)
+    tup = TranslationUnit(
+        id="px1", source_path="src/px.c", directory=str(repo), arguments=["cc", "-c", "src/px.c"]
+    )
+    fn = FunctionInfo(
+        id="px1:g",
+        name="g",
+        tu_id="px1",
+        source_path="src/px.c",
+        start_line=5,
+        end_line=5,
+        signature="g",
+        body_hash="hg",
+    )
+    res = backend.translate(tup, [fn], repo)
+    assert res.tu_error is None and res.supported == {"g": True}, res.tu_error

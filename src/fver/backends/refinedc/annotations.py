@@ -297,6 +297,99 @@ def splice(
     return out
 
 
+def definition_prototype(definition_text: str) -> str:
+    """`static int f(int x)` from a definition's text: everything up to the
+    first top-level `{`, whitespace-collapsed, plus `;`."""
+    clean = remove_comments(definition_text)
+    depth = 0
+    for i, ch in enumerate(clean):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "{" and depth == 0:
+            clean = clean[:i]
+            break
+    sig = re.sub(r"\s+", " ", clean).strip().rstrip(";")
+    return sig + ";"
+
+
+def stub_definition(source_text: str, start_line: int, end_line: int) -> str:
+    """Replace the definition on lines start..end (1-based, inclusive) by its
+    prototype, padded with blank lines so every other line keeps its number.
+    Attributes above the definition are left in place (they then attach to
+    the prototype, which is what RefinedC wants for a spec-only callee)."""
+    lines = source_text.split("\n")
+    if start_line < 1 or end_line > len(lines) or start_line > end_line:
+        raise ValueError(f"line range {start_line}-{end_line} out of bounds")
+    body = lines[start_line - 1 : end_line]
+    proto = definition_prototype("\n".join(body))
+    # Preprocessor directives inside the body must stay, or #if/#else/#endif
+    # nesting breaks for the rest of the file. Everything else goes blank.
+    kept = [ln if ln.lstrip().startswith("#") else "" for ln in body]
+    kept[0] = proto if not kept[0] else proto + " " + kept[0]
+    lines[start_line - 1 : end_line] = kept
+    return "\n".join(lines)
+
+
+def enclosing_definition(source_text: str, line: int) -> tuple[int, int, str] | None:
+    """The top-level `{...}` block (a function body) containing `line`
+    (1-based), as (start_line, end_line, name), with start_line at the line
+    that opens the declarator (walking up to the previous blank line or `;`
+    or `}`). Used when the extractor did not recognise a definition (macro
+    in the declarator, K&R style). None if `line` is not inside a body."""
+    clean = remove_comments(source_text)
+    lines = clean.split("\n")
+    depth = 0
+    open_line = 0
+    in_str = None
+    in_directive = False  # a #define may span lines and contain unbalanced braces
+    for i, ln in enumerate(lines, start=1):
+        if in_directive or ln.lstrip().startswith("#"):
+            in_directive = ln.rstrip().endswith("\\")
+            continue
+        for ch in ln:
+            if in_str:
+                if ch == in_str:
+                    in_str = None
+                continue
+            if ch in "\"'":
+                in_str = ch
+            elif ch == "{":
+                if depth == 0:
+                    open_line = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and open_line and open_line <= line <= i:
+                    start = open_line
+                    while start > 1:
+                        prev = lines[start - 2].strip()
+                        if not prev or prev.endswith((";", "}", "{", ">")) or prev.startswith("#"):
+                            break
+                        start -= 1
+                    head = " ".join(lines[start - 1 : open_line])
+                    head = head[: head.index("{")] if "{" in head else head
+                    m = re.search(r"([A-Za-z_]\w*)\s*\([^;{]*$", head)
+                    name = m.group(1) if m else ""
+                    return start, i, name
+                if depth == 0:
+                    open_line = 0
+        in_str = None  # strings do not span lines in C source
+    return None
+
+
+def blank_lines(source_text: str, start_line: int, end_line: int) -> str:
+    """Replace lines start..end (1-based, inclusive) by empty lines."""
+    lines = source_text.split("\n")
+    if start_line < 1 or end_line > len(lines) or start_line > end_line:
+        raise ValueError(f"line range {start_line}-{end_line} out of bounds")
+    lines[start_line - 1 : end_line] = [
+        ln if ln.lstrip().startswith("#") else "" for ln in lines[start_line - 1 : end_line]
+    ]
+    return "\n".join(lines)
+
+
 def has_refinedc_include(text: str) -> bool:
     return _INCLUDE_RE.search(text) is not None
 

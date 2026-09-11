@@ -139,7 +139,10 @@ def extract_frontend_errors(text: str) -> list[FrontendError]:
         if any(w in ln for w in facts.WARNING_MARKERS):
             continue
         m = re.search(facts.FRONTEND_LOCATION_REGEX, ln)
-        if m and any(mk in ln for mk in facts.FRONTEND_ERROR_MARKERS):
+        # Any `[file:line:col...] message` line from refinedc that is not one
+        # of the known warnings is an error (parser, "Not implemented",
+        # "Forbidden", Ail typing errors such as "Invalid use of ...").
+        if m and ln[: m.start()].strip() == "" and ln[m.end() :].strip():
             msg = ln[m.end() :].strip()
             if msg.rstrip(".").endswith("Frontend error") and i + 1 < len(lines):
                 msg = msg.rstrip() + " " + lines[i + 1].strip()

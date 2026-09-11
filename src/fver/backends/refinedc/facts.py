@@ -45,6 +45,10 @@ PREDEFINED_MACROS = ("__refinedc__", "__cerb__")
 # 125 internal error (an uncaught OCaml exception, e.g. a malformed
 # attribute string crashes the annotation parser).
 EXIT_INTERNAL_ERROR = 125
+# A crash (assertion failure in ail_to_coq.ml on libyaml's scanner.c and
+# loader.c) carries no location; translate() bisects by stubbing functions,
+# largest first, at most this many front-end runs per crash.
+CRASH_BISECT_LIMIT = 60
 
 # ---------------------------------------------------------------------------
 # Project layout (CONFIRMED)
@@ -209,6 +213,8 @@ INTERNAL_ERROR_MARKER = "internal error"  # `refinedc: internal error, uncaught 
 FRONTEND_ERROR_MARKERS = (
     "Frontend error.",
     "Not implemented:",
+    "Forbidden:",  # e.g. `Forbidden: nested assignment`, `nested postfix increment`
+    "Invalid ",  # Ail typing errors, e.g. `Invalid use of binary operation [+]`
     "feature not yet supported",
     "is not currently supported",
     "error:",
@@ -286,3 +292,37 @@ ALLOWED_AXIOMS = frozenset(
 #    the front-end (`Tags definitions must be set`). goto, switch, function
 #    pointers (with function_ptr<...> types), unions (rc::union_tag) and
 #    bit-level ops are supported.
+
+# ---------------------------------------------------------------------------
+# POSIX shim headers (CONFIRMED need: Cerberus's libc has no <sys/*.h>,
+# <unistd.h>, <fcntl.h>, <dlfcn.h>; files including them are rejected before
+# any function is examined). Shipped in shims/, added with -I after the
+# project's own include directories when the `posix_shims` setting is on.
+# Prototypes only: every function they declare stays a trusted external.
+# ---------------------------------------------------------------------------
+SHIMS_DIR_NAME = "shims"
+# Force-included before every checked file (CONFIRMED need: zlib's
+# `ZLIB_INTERNAL` expands to `__attribute__((visibility("hidden")))`, which the
+# Cerberus parser rejects as `unexpected token after '('`).
+PRELUDE_HEADER = "fver_prelude.h"
+SHIMMED_HEADERS = (
+    "sys/types.h",
+    "sys/stat.h",
+    "sys/time.h",
+    "sys/wait.h",
+    "sys/mman.h",
+    "unistd.h",
+    "fcntl.h",
+    "dlfcn.h",
+    "strings.h",
+)
+
+# Replicating RefinedC's preprocessor run (CONFIRMED against frontend/
+# cerb_wrapper.ml and by matching reported lines): Ail-level messages such as
+# `Invalid use of binary operation [+]` carry the physical line of this
+# output, while parser messages (`Frontend error.`, `Not implemented:`) and
+# cpp errors carry real source lines.
+CPP_ARGV_PREFIX = ["cc", "-E", "-C", "-Werror", "-nostdinc", "-undef"]
+CPP_PREDEFINES = ("__refinedc__", "__cerb__", "DEBUG", "MAX_CPUS=4", "MAX_VMS=2", "HEAP_PAGES=10")
+CPP_LINE_MARKER_REGEX = r'^#\s+(?P<line>\d+)\s+"(?P<file>[^"]*)"'
+RAW_LINE_MESSAGE_PREFIXES = ("Frontend error", "Not implemented", "feature not yet supported")

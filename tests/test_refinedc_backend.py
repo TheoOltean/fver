@@ -430,14 +430,41 @@ def test_translate_maps_frontend_errors_to_functions(
 
     out = strip_ansi(canned("frontend_not_implemented_varargs.txt")).replace("fe2.c:11", "a.c:9")
     monkeypatch.setattr(backend, "_have_refinedc", lambda: True)
-    monkeypatch.setattr(
-        backend, "_run", lambda argv, cwd, timeout: ProcResult(argv, 1, out, "", 0.1)
-    )
+    calls: list[str] = []
+
+    def fake_run(argv, cwd, timeout):
+        # First round: the error inside `zero`; once it is stubbed the file passes.
+        if "check" not in argv:  # `refinedc init`
+            return ProcResult(argv, 0, "", "", 0.1)
+        calls.append(Path(argv[-1]).read_text())
+        first = len(calls) == 1
+        return ProcResult(argv, 1 if first else 0, out if first else "", "", 0.1)
+
+    monkeypatch.setattr(backend, "_run", fake_run)
     fns = [task.function, fn_info("after", 11, 13)]
     res = backend.translate(task.tu, fns, task.repo_root)
     # a.c:9 in the copy is source line 8 (one include line prepended): inside zero.
-    assert res.supported == {"zero": False, "after": True}
+    assert res.supported == {"zero": False, "after": True} and res.tu_error is None
     assert "va_end" in res.reasons["zero"]
+    assert len(calls) == 2
+    assert "void zero(int *p, size_t n);" in calls[1] and "p[i] = 0" not in calls[1]
+    assert calls[1].count("\n") == calls[0].count("\n")  # line-preserving stub
+    # The same error again at the stubbed prototype: it is blanked, then the file passes.
+    calls.clear()
+
+    def fake_run2(argv, cwd, timeout):
+        if "check" not in argv:
+            return ProcResult(argv, 0, "", "", 0.1)
+        calls.append(Path(argv[-1]).read_text())
+        return ProcResult(
+            argv, 1 if len(calls) <= 2 else 0, out if len(calls) <= 2 else "", "", 0.1
+        )
+
+    monkeypatch.setattr(backend, "_run", fake_run2)
+    res = backend.translate(task.tu, fns, task.repo_root)
+    assert res.supported == {"zero": False, "after": True} and res.tu_error is None
+    assert "prototype also rejected" in res.reasons["zero"]
+    assert "void zero(int *p, size_t n);" not in calls[2]
     # A header-level error rejects the whole file.
     out2 = strip_ansi(canned("frontend_float_unsupported.txt"))
     monkeypatch.setattr(
@@ -445,6 +472,22 @@ def test_translate_maps_frontend_errors_to_functions(
     )
     res = backend.translate(task.tu, fns, task.repo_root)
     assert res.supported == {"zero": False, "after": False} and "float" in (res.tu_error or "")
+    # An Ail-level error in preprocessed coordinates is mapped through the cpp map.
+    ail = "[src/tu_x/a.c:2756:17-63] Invalid use of binary operation [+]\n"
+    calls.clear()
+
+    def fake_run3(argv, cwd, timeout):
+        if "check" not in argv:
+            return ProcResult(argv, 0, "", "", 0.1)
+        calls.append(Path(argv[-1]).read_text())
+        first = len(calls) == 1
+        return ProcResult(argv, 1 if first else 0, ail if first else "", "", 0.1)
+
+    monkeypatch.setattr(backend, "_run", fake_run3)
+    monkeypatch.setattr(backend, "_cpp_map_for", lambda c_file, tu, repo_root: {2756: 13})
+    res = backend.translate(task.tu, fns, task.repo_root)
+    assert res.supported == {"zero": True, "after": False} and res.tu_error is None
+    assert "binary operation" in res.reasons["after"]
 
 
 def test_prepare_writes_project_file_when_tool_missing(
@@ -518,3 +561,217 @@ def test_tool_env_sets_opam_prefix_from_binary_location(tmp_path: Path, monkeypa
     # A bare name that is not found leaves the environment alone.
     monkeypatch.setenv("OPAM_SWITCH_PREFIX", "/elsewhere")
     assert _tool_env("no-such-binary-xyz")["OPAM_SWITCH_PREFIX"] == "/elsewhere"
+
+
+def test_definition_prototype_and_stub():
+    src = "int a(void);\nstatic int\nhelper(int x, int (*f)(int)) /* c */\n{\n  return f(x);\n}\nint b(void) { return 1; }\n"
+    assert (
+        ann.definition_prototype("static inline int f(int a,\n int b) { return a; }")
+        == "static inline int f(int a, int b);"
+    )
+    out = ann.stub_definition(src, 2, 6)
+    assert out.split("\n")[1] == "static int helper(int x, int (*f)(int));"
+    assert out.count("\n") == src.count("\n") and "return f(x)" not in out
+    assert "int b(void) { return 1; }" in out
+    assert ann.blank_lines(src, 2, 6).split("\n")[1:6] == [""] * 5
+
+
+def test_check_stubs_every_other_definition(backend: RefinedCBackend, task: FunctionTask):
+    task.callee_specs = {}
+    res = backend.check(task, Submission(files={"function.c": ANNOTATED}), timeout_seconds=5)
+    text = Path(res.artifacts["source"]).read_text()
+    assert "static int helper(int x);" in text and "return x + 1;" not in text
+    assert "int after(void);" in text and "return helper(1);" not in text
+    assert "p[i] = 0;" in text  # the target keeps its body
+
+
+def test_shim_dirs_come_after_project_flags(
+    backend: RefinedCBackend, task: FunctionTask, monkeypatch, tmp_path: Path
+):
+    from fver.backends.refinedc import backend as mod
+
+    runtime = tmp_path / "rt"
+    (runtime / "libc" / "include" / "posix").mkdir(parents=True)
+    monkeypatch.setattr(backend, "_env", lambda: {"CERB_RUNTIME": str(runtime)})
+    flags = backend._cpp_flags(task.tu, task.repo_root)
+    posix = f"-I{runtime / 'libc' / 'include' / 'posix'}"
+    assert flags.index(posix) < flags.index(f"-I{mod._SHIMS_DIR}")
+    assert flags.index(f"-I{Path(task.tu.directory) / 'include'}") < flags.index(posix)
+    backend.posix_shims = False
+    assert not any(str(mod._SHIMS_DIR) in f for f in backend._cpp_flags(task.tu, task.repo_root))
+    for h in facts.SHIMMED_HEADERS:
+        assert (mod._SHIMS_DIR / h).exists(), h
+
+
+def test_cpp_line_map_follows_line_markers():
+    from fver.backends.refinedc.backend import cpp_line_map
+
+    out = (
+        '# 1 "a.c"\n'  # phys 1
+        '# 1 "<built-in>"\n'  # 2
+        '# 1 "a.c" 2\n'  # 3
+        '# 1 "/inc/stddef.h" 1\n'  # 4
+        "typedef long ptrdiff_t;\n"  # 5 (stddef.h:1)
+        "\n"  # 6
+        '# 2 "a.c" 2\n'  # 7
+        "int f(void) {\n"  # 8 -> a.c:2
+        "  return 0;\n"  # 9 -> a.c:3
+        "}\n"  # 10 -> a.c:4
+    )
+    assert cpp_line_map(out, "/x/a.c") == {8: 2, 9: 3, 10: 4}
+
+
+def test_check_argv_force_includes_prelude(backend: RefinedCBackend, task: FunctionTask):
+    from fver.backends.refinedc import backend as mod
+
+    argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=False)
+    assert f"--include={mod._SHIMS_DIR / facts.PRELUDE_HEADER}" in argv
+    backend.posix_shims = False
+    argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=False)
+    assert not any(a.startswith("--include=") for a in argv)
+
+
+def test_enclosing_definition_by_brace_scan():
+    src = (
+        "#include <x.h>\n"
+        "int a;\n"
+        "int ZEXPORTVA gzprintf(gzFile file, const char *format, ...)\n"
+        "{\n"
+        '  char s[] = "{";\n'
+        "  if (x) { y(); }\n"
+        "  return 0;\n"
+        "}\n"
+        "struct s { int q; };\n"
+        "static int k(void) { return 1; }\n"
+    )
+    assert ann.enclosing_definition(src, 6) == (3, 8, "gzprintf")
+    assert ann.enclosing_definition(src, 10) == (10, 10, "k")
+    assert ann.enclosing_definition(src, 2) is None
+    assert ann.enclosing_definition(src, 9) == (9, 9, "")  # a struct body, no name
+
+
+def test_translate_isolates_body_the_extractor_missed(
+    backend: RefinedCBackend, task: FunctionTask, monkeypatch
+):
+    from fver.util.proc import ProcResult
+
+    # `helper` is not in the function list handed to translate(), yet the
+    # error inside it must not reject the file: the body is stubbed by brace
+    # matching and the known functions stay supported.
+    err = "[a.c:5:3-10] Forbidden: nested assignment\n"  # copy line 5 = source line 4 (in helper)
+    calls: list[str] = []
+
+    def fake_run(argv, cwd, timeout):
+        if "check" not in argv:
+            return ProcResult(argv, 0, "", "", 0.1)
+        calls.append(Path(argv[-1]).read_text())
+        first = len(calls) == 1
+        return ProcResult(argv, 1 if first else 0, err if first else "", "", 0.1)
+
+    monkeypatch.setattr(backend, "_have_refinedc", lambda: True)
+    monkeypatch.setattr(backend, "_run", fake_run)
+    monkeypatch.setattr(backend, "_cpp_map_for", lambda c_file, tu, repo_root: {})
+    fns = [task.function, fn_info("after", 11, 13)]
+    res = backend.translate(task.tu, fns, task.repo_root)
+    assert res.tu_error is None and res.supported == {"zero": True, "after": True}
+    assert "static int helper(int x);" in calls[1] and "return x + 1;" not in calls[1]
+
+
+def test_enclosing_definition_ignores_macros_with_braces():
+    src = (
+        "#define send_bits(s, value, length) \\\n"
+        "{ int len = length; \\\n"
+        "  s->bi_buf |= (value) << s->bi_valid; \\\n"
+        "}\n"
+        "local void compress_block(deflate_state *s, const ct_data *ltree)\n"
+        "{\n"
+        "#ifdef ZLIB_DEBUG\n"
+        "    int x = 0;\n"
+        "#endif\n"
+        "    send_bits(s, 1, 2);\n"
+        "}\n"
+    )
+    assert ann.enclosing_definition(src, 10) == (5, 11, "compress_block")
+    out = ann.stub_definition(src, 5, 11)
+    assert (
+        out.split("\n")[4] == "local void compress_block(deflate_state *s, const ct_data *ltree);"
+    )
+    assert out.split("\n")[6] == "#ifdef ZLIB_DEBUG" and out.split("\n")[8] == "#endif"
+    assert out.count("\n") == src.count("\n")
+
+
+def test_definition_ranges_from_preprocessed_text(
+    backend: RefinedCBackend, task: FunctionTask, monkeypatch
+):
+    # The raw copy has `helper` decorated by a macro tree-sitter cannot parse;
+    # the preprocessed text (with line markers) reveals it.
+    cpp = (
+        '# 1 "a.c"\n'
+        '# 1 "<built-in>"\n'
+        '# 1 "a.c" 2\n'
+        "\n"  # 4 -> a.c:1
+        '# 3 "a.c"\n'
+        "static int helper(int x) {\n"  # 6 -> a.c:3
+        "  return x + 1;\n"  # 7 -> a.c:4
+        "}\n"  # 8 -> a.c:5
+    )
+    monkeypatch.setattr(
+        backend,
+        "_preprocess",
+        lambda c, t, r: (
+            __import__("fver.backends.refinedc.backend", fromlist=["cpp_line_map"]).cpp_line_map(
+                cpp, "a.c"
+            ),
+            cpp,
+        ),
+    )
+    assert backend._definition_ranges(Path("a.c"), task.tu, task.repo_root) == {"helper": (3, 5)}
+    # translate() stubs it by that range even though it is not in `functions`.
+    from fver.util.proc import ProcResult
+
+    err = "[a.c:5:3-10] Forbidden: nested assignment\n"  # copy line 5 = helper's body
+    calls: list[str] = []
+
+    def fake_run(argv, cwd, timeout):
+        if "check" not in argv:
+            return ProcResult(argv, 0, "", "", 0.1)
+        calls.append(Path(argv[-1]).read_text())
+        first = len(calls) == 1
+        return ProcResult(argv, 1 if first else 0, err if first else "", "", 0.1)
+
+    monkeypatch.setattr(backend, "_have_refinedc", lambda: True)
+    monkeypatch.setattr(backend, "_run", fake_run)
+    monkeypatch.setattr(backend, "_definition_ranges", lambda c, t, r: {"helper": (4, 6)})
+    fns = [task.function, fn_info("after", 11, 13)]
+    res = backend.translate(task.tu, fns, task.repo_root)
+    assert res.tu_error is None and res.supported == {"zero": True, "after": True}
+    assert "static int helper(int x);" in calls[1] and "return x + 1;" not in calls[1]
+
+
+def test_translate_bisects_a_front_end_crash(
+    backend: RefinedCBackend, task: FunctionTask, monkeypatch
+):
+    from fver.util.proc import ProcResult
+
+    crash = "refinedc: internal error, uncaught exception:\n  Assertion failed\n"
+    seen: list[str] = []
+
+    def fake_run(argv, cwd, timeout):
+        if "check" not in argv:
+            return ProcResult(argv, 0, "", "", 0.1)
+        text = Path(argv[-1]).read_text()
+        seen.append(text)
+        # The crash is caused by `after`'s body; anything else keeps crashing.
+        if "return helper(1);" in text:
+            return ProcResult(argv, 125, crash, "", 0.1)
+        return ProcResult(argv, 0, "", "", 0.1)
+
+    monkeypatch.setattr(backend, "_have_refinedc", lambda: True)
+    monkeypatch.setattr(backend, "_run", fake_run)
+    monkeypatch.setattr(backend, "_definition_ranges", lambda c, t, r: {})
+    fns = [task.function, fn_info("after", 11, 13)]
+    res = backend.translate(task.tu, fns, task.repo_root)
+    assert res.tu_error is None
+    assert res.supported == {"zero": True, "after": False}
+    assert "crash" in res.reasons["after"] and "Assertion" in res.reasons["after"]
+    assert "int after(void);" in seen[-1] and "p[i] = 0" in seen[-1]
