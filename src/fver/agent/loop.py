@@ -337,6 +337,34 @@ class Verifier:
         extra["prover"] = "external"."""
         task = self.build_task(function)
         key = self.cache_key_for(task)
+        cached = store.cache_lookup(self.ws, key)
+        if (
+            cached is not None
+            and cached.get("status") == Status.VERIFIED.value
+            and cached.get("submission") == submission.files
+        ):
+            # Same code, same contracts, same annotations: the stored proof
+            # stands (e.g. an edit was reverted). No checker run needed.
+            result = CheckResult(
+                outcome=CheckOutcome.OK,
+                feedback="",
+                proof_hash=cached.get("proof_hash"),
+                assumptions=list(cached.get("assumptions", [])),
+                tool_versions=dict(cached.get("tool_versions", {})),
+            )
+            store.save_accepted(self.ws, task, submission, result, key, self.backend.name)
+            claim = self._claim(
+                task,
+                Status.VERIFIED,
+                key,
+                Cost(),
+                "cache hit",
+                result,
+                cache_hit=True,
+                prover="external",
+            )
+            self.ledger.record_claim(claim)
+            return AttemptOutcome(kind="verified", feedback="", result=result, claim=claim)
         attempt = self._next_attempt_number(task)
         cost = Cost()
         cur = self.ledger.current_claim(function.id, self.backend.name, self.target.key)
