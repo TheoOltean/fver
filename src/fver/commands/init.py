@@ -44,7 +44,7 @@ def detect_build(repo_root: Path) -> tuple[BuildConfig, list[str]]:
     elif any((repo_root / m).exists() for m in ("Makefile", "makefile", "GNUmakefile")):
         build.capture_command = "bear -- make"
         notes.append(
-            "Makefile project: `fver scan` will run `bear -- make` to capture the build (needs bear)"
+            "Makefile project: `fver scan` will run `bear -- make` to capture the build"
         )
     else:
         notes.append(

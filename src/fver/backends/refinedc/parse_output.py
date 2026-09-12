@@ -230,7 +230,7 @@ def classify_full(
     if returncode == 127 or "command not found" in combined:
         return Classification(
             CheckOutcome.TOOL_ERROR,
-            f"`{facts.REFINEDC_BIN}` is not installed or not on PATH. Run `fver doctor`.",
+            f"`{facts.REFINEDC_BIN}` was not found. Run `fver setup`.",
         )
     if returncode == 0 or facts.SUCCESS_MARKER in combined:
         return Classification(CheckOutcome.OK, "Accepted by refinedc.")
