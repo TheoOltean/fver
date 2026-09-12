@@ -114,7 +114,7 @@ def test_prove_targets(repo: Path, monkeypatch, fake_cbmc) -> None:
     r = CliRunner().invoke(app, ["status", "src/m.c"])
     assert r.exit_code == 0 and "add" in r.output and "twice" in r.output and "waiting" in r.output
     r = CliRunner().invoke(app, ["status", "add"])
-    assert r.exit_code == 0 and "attack score" in r.output
+    assert r.exit_code == 0 and "int add(int a, int b)" in r.output and "waiting" in r.output
     r = CliRunner().invoke(app, ["status", "-A"])
     assert (
         r.exit_code == 0 and "src/m.c" in r.output and "add" in r.output and "waiting" in r.output

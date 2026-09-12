@@ -188,57 +188,32 @@ def function_page(ctx: AppContext, name: str) -> int:
 
 
 def _detail(ctx: AppContext, fn: FunctionInfo) -> None:
-    from fver.prove import store
-
+    """One function: where it is, its state, its contract if proven, and
+    where the proof lives. Nothing else."""
     backend, tk = ctx.backend_name, ctx.target.key
     claim = ctx.ledger.current_claim(fn.id, backend, tk)
     status = claim.status if claim else Status.NOT_ATTEMPTED
-    console.print(f"[bold]{fn.name}[/]  {fn.source_path}:{fn.start_line}-{fn.end_line}")
-    console.print(f"  {fn.signature}")
     console.print(
-        f"  status: {styled(status)}" + (f"  {claim.message}" if claim and claim.message else "")
+        f"[bold]{fn.name}[/]  {fn.source_path}:{fn.start_line}-{fn.end_line}  {styled(status)}"
     )
-    console.print(
-        f"  attack score: {fn.attack_score:.2f}"
-        + (f"  ({', '.join(fn.attack_reasons)})" if fn.attack_reasons else "")
-    )
-    if fn.callees:
-        console.print(f"  calls: {', '.join(fn.callees)}")
-    deps = ctx.ledger.dependents(fn.name)
-    if deps:
-        console.print("  called by: " + ", ".join(f"{d.name} ({d.source_path})" for d in deps))
-
-    loaded = store.load_accepted(ctx.ws, fn.source_path, fn.name)
-    if loaded is not None:
-        sub, _record = loaded
-        console.print("\n[bold]Accepted contract[/] (what callers rely on):")
-        contract = ctx.backend.extract_spec(sub, fn) if ctx.backend is not None else ""
-        if not contract.strip():
-            contract = "\n".join(
-                ln.strip() for t in sub.files.values() for ln in t.splitlines() if "rc::" in ln
-            )
-        for line in contract.splitlines():
-            console.print("  " + line.rstrip(), markup=False, highlight=False)
-    if claim and claim.assumptions:
-        console.print("\n[bold]Trusted[/] (specs this proof relies on):")
-        for a in claim.assumptions:
-            console.print(f"  - {a}")
-
-    history = ctx.ledger.claims_for(fn.id)
-    if history:
-        console.print("\n[bold]History[/]")
-        for c in history:
-            console.print(
-                f"  {c.created_at[:19]}  {styled(c.status)}  ${c.cost.usd:.2f}  {c.message[:90]}"
-            )
-    findings = ctx.ledger.findings(function_id=fn.id)
-    if findings:
-        console.print("\n[bold]CBMC findings[/]")
-        for f in findings:
-            console.print(f"  line {f.line or '?'}: {f.kind} ({f.confidence}) {f.message[:90]}")
-    pdir = ctx.ws.proofs_dir / fn.source_path / fn.name
-    if pdir.exists() and any(pdir.iterdir()):
-        console.print(f"\nProof files: {pdir}")
+    console.print(f"  {fn.signature}", markup=False, highlight=False)
+    if status is Status.VERIFIED:
+        contract = _contract_lines(ctx, fn)
+        if contract and not contract[-1].lstrip().startswith(("/*@", "//@", "[[", "*/")):
+            contract = contract[:-1]  # the prototype: the signature is already shown
+        if contract:
+            console.print()
+            for ln in contract:
+                console.print("  " + ln, markup=False, highlight=False)
+        pdir = ctx.ws.proofs_dir / fn.source_path / fn.name
+        if pdir.exists():
+            console.print(f"\n  proof: {ctx.ws.relpath(pdir / 'function.c')}")
+    elif status is Status.BUG_FOUND:
+        for f in ctx.ledger.findings(function_id=fn.id):
+            if f.confidence == "high":
+                console.print(f"  line {f.line or '?'}: {f.kind}: {f.message[:100]}")
+    elif claim is not None and claim.message:
+        console.print(f"  {claim.message[:160]}", markup=False, highlight=False)
 
 
 def register(app: typer.Typer) -> None:

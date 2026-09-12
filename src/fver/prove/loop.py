@@ -486,6 +486,7 @@ class Verifier:
         file_context = prompts.select_file_context(task.source_text, f)
         convo = Conversation(prompts.build_task_message(task, examples, file_context))
         last_feedback = ""
+        last_reason = ""  # short, for the ledger message
         best: tuple[int, Submission] | None = None  # (rank, submission) higher rank = closer
         refusals = 0
         attempt = 0
@@ -495,6 +496,7 @@ class Verifier:
             remaining = max_attempts - attempt
             if cost.usd >= budget.max_usd_per_function:
                 last_feedback = f"per-function budget of ${budget.max_usd_per_function:.2f} spent"
+                last_reason = last_feedback
                 attempt -= 1
                 break
             try:
@@ -537,6 +539,7 @@ class Verifier:
                 last_feedback = prompts.build_parse_error_message(
                     parsed.message, attempt, remaining
                 )
+                last_reason = "unreadable submission"
                 convo.add(completion, last_feedback, f"attempt {attempt}: unreadable submission")
                 continue
 
@@ -544,6 +547,7 @@ class Verifier:
             out = self.attempt_submission(task, key, submission, attempt, remaining, cost)
             if out.kind == "guardrail":
                 last_feedback = out.feedback
+                last_reason = "guardrail violation"
                 convo.add(completion, last_feedback, f"attempt {attempt}: guardrail violation")
                 continue
             if out.kind == "tool_error":
@@ -557,6 +561,7 @@ class Verifier:
                 return FunctionOutcome(out.claim, attempts=attempt)
             if out.kind == "audit_failed":
                 last_feedback = out.feedback
+                last_reason = "audit failed"
                 convo.add(completion, last_feedback, f"attempt {attempt}: audit failed")
                 continue
             # feedback: checker rejected the submission
@@ -580,11 +585,12 @@ class Verifier:
             if best is None or rank >= best[0]:
                 best = (rank, submission)
             last_feedback = out.feedback
+            last_reason = result.outcome.value.replace("_", " ")
             convo.add(completion, last_feedback, f"attempt {attempt}: {result.outcome.value}")
 
         msg = f"unresolved after {attempt} attempt(s)"
-        if last_feedback:
-            msg += ": " + last_feedback.split("\n", 1)[0][:200]
+        if last_reason:
+            msg += f": last result {last_reason}"
         claim = self._claim(
             task,
             Status.UNRESOLVED,
