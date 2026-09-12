@@ -333,3 +333,15 @@ def test_log_records_from_child_loggers_carry_the_command_tag(tmp_path):
         h.flush()
     text = (tmp_path / LOG_FILE).read_text()
     assert "[prove] fver.some.child: hello from a child" in text
+
+
+def test_doctor_checks_the_proof_stack_outside_a_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # no .fver/ anywhere above
+    monkeypatch.setattr(proc, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(
+        proc, "run", lambda argv, **kw: proc.ProcResult(argv, 0, "tool 1.0\n", "", 0.0)
+    )
+    rows, err = doctor.collect_statuses()
+    names = {x.name for x in rows}
+    assert {"refinedc", "coqc", "dune"} <= names and "backend" not in names
+    assert all(x.found for x in rows if x.name in ("refinedc", "coqc", "dune"))

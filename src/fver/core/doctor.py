@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
+from pathlib import Path
 
 from rich.table import Table
 
@@ -100,15 +101,23 @@ def collect_statuses(online: bool = False) -> tuple[list[ToolStatus], str | None
         rows.extend(CbmcHunter().doctor())
     except Exception as e:  # pragma: no cover  # noqa: BLE001
         rows.append(ToolStatus("hunters", False, required=False, hint=str(e)))
-    if ctx is not None and ctx.backend is not None:
-        try:
-            rows.extend(ctx.backend.doctor())
-        except Exception as e:  # noqa: BLE001
-            rows.append(
-                ToolStatus(f"backend:{ctx.backend_name}", False, required=True, hint=str(e))
-            )
-    elif backend_error:
-        rows.append(ToolStatus("backend", False, required=True, hint=backend_error))
+    backend = ctx.backend if ctx is not None else None
+    if backend is None:
+        # Outside a project (`fver setup` runs anywhere): check the default
+        # proof stack with default settings.
+        import tempfile
+
+        from fver.backends.registry import make_backend
+        from fver.core.models import Target
+
+        backend = make_backend(
+            "refinedc", Path(tempfile.mkdtemp(prefix="fver-doctor-")), {}, Target()
+        )
+        backend_error = None
+    try:
+        rows.extend(backend.doctor())
+    except Exception as e:  # noqa: BLE001
+        rows.append(ToolStatus(f"backend:{backend.name}", False, required=True, hint=str(e)))
     rows.append(credential_status(_config_api_key()))
 
     if online:
