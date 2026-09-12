@@ -251,7 +251,7 @@ def test_classify_tool_errors():
     out, fb, _, _ = classify("", "", 0, True, "f")
     assert out is CheckOutcome.TOOL_ERROR and "timed out" in fb
     out, fb, _, _ = classify("", "refinedc: command not found", 127, False, "f")
-    assert out is CheckOutcome.TOOL_ERROR and "doctor" in fb
+    assert out is CheckOutcome.TOOL_ERROR and "fver setup" in fb
     out, fb, _, _ = classify("", "something odd", 3, False, "f")
     assert out is CheckOutcome.TOOL_ERROR
 
