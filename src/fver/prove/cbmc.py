@@ -125,10 +125,11 @@ CBMC_CHECKS = [
     "--undefined-shift-check",
 ]
 
-MAX_FUNCTIONS_PER_TU = 20
+MAX_FUNCTIONS_PER_TU = 2  # harness mode (no main): only the top-ranked functions, briefly
 INSTALL_HINT = "run `fver setup`"
 CBMC_UNWIND = 8  # loop unwinding bound
-CBMC_TIMEOUT_SECONDS = 300  # per entry point
+CBMC_TIMEOUT_SECONDS = 300  # a real main: worth waiting for
+CBMC_HARNESS_TIMEOUT_SECONDS = 20  # a synthetic entry point: informational only
 
 # (substring of property class or description, lower-case) -> kind
 _KIND_TABLE: list[tuple[str, str]] = [
@@ -369,7 +370,8 @@ class CbmcHunter:
             source_abs = str((repo_root / tu.source_path).resolve())
             for fn_name in entry_points:
                 argv = cbmc_argv(source_abs, flags, CBMC_UNWIND, fn_name)
-                r = proc.run(argv, cwd=Path(tu.directory), timeout=CBMC_TIMEOUT_SECONDS)
+                timeout = CBMC_TIMEOUT_SECONDS if has_main else CBMC_HARNESS_TIMEOUT_SECONDS
+                r = proc.run(argv, cwd=Path(tu.directory), timeout=timeout)
                 tag = tu.id + ("" if fn_name is None else f"_{fn_name}")
                 (workdir / f"{tag}.json").write_text(r.stdout)
                 if r.timed_out:
