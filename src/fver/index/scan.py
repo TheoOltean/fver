@@ -9,44 +9,19 @@ from rich.table import Table
 
 from fver.backends.base import BackendToolMissing
 from fver.core.models import Claim, PropertyClass, Status
-from fver.util.log import console, setup_logging
+from fver.util.log import console
 
 log = logging.getLogger("fver.scan")
 
 
-def register(app: typer.Typer) -> None:
-    @app.command("scan", hidden=True)
-    def scan(
-        no_preprocess: bool = typer.Option(
-            False, "--no-preprocess", help="Skip compiler preprocessing."
-        ),
-        no_translate: bool = typer.Option(
-            False, "--no-translate", help="Skip the backend front-end."
-        ),
-        backend: str | None = typer.Option(
-            None, "--backend", help="Override the configured backend."
-        ),
-        verbose: bool = typer.Option(False, "--verbose", "-v"),
-    ) -> None:
-        """Capture the build, index every function, and find out what the backend can represent."""
-        from fver.core.context import AppContext
-
-        ctx = AppContext.load(need_backend=not no_translate, backend_name=backend)
-        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name="scan")
-        try:
-            run_scan(ctx, preprocess=not no_preprocess, translate=not no_translate)
-        finally:
-            ctx.close()
-
-
 def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool = False) -> dict:
     """The scan pipeline. Returns the index dict that was written to work/index.json."""
-    from fver.build.compile_commands import capture_build
-    from fver.build.preprocess import preprocess_all
-    from fver.build.targets import compare_target, detect_target
-    from fver.extract.attack_surface import score
-    from fver.extract.callgraph import build_callgraph
-    from fver.extract.functions import extract_from_tu
+    from fver.index.attack_surface import score
+    from fver.index.callgraph import build_callgraph
+    from fver.index.compile_commands import capture_build
+    from fver.index.functions import extract_from_tu
+    from fver.index.preprocess import preprocess_all
+    from fver.index.targets import compare_target, detect_target
 
     ws, cfg, ledger = ctx.ws, ctx.config, ctx.ledger
     backend_name = ctx.backend_name
@@ -157,7 +132,7 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
         # 7. proofs whose inputs changed since they were made
         stale = []
         if ctx.backend is not None:
-            from fver.agent.invalidate import reconcile
+            from fver.prove.invalidate import reconcile
 
             stale = reconcile(ctx, run_id)
             index["stale"] = [s.function.id for s in stale]

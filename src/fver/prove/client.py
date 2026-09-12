@@ -16,10 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fver.agent.pricing import cost_from_usage, price_for
 from fver.core.models import Cost, now_iso
+from fver.prove.pricing import cost_from_usage, price_for
 
-log = logging.getLogger("fver.agent.client")
+log = logging.getLogger("fver.prove.client")
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MAX_CACHE_BREAKPOINTS = 4

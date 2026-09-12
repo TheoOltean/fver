@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from fver.agent import prompts
-from fver.agent.client import Completion
-from fver.agent.loop import HISTORY_KEEP, Conversation
 from fver.backends.base import CheckOutcome, CheckResult, FunctionTask, Submission
 from fver.core.models import Cost
+from fver.prove import prompts
+from fver.prove.client import Completion
+from fver.prove.loop import HISTORY_KEEP, Conversation
 from tests.test_agent_fakes import FakeBackend, make_repo
 
 

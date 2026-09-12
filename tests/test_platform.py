@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fver.build import targets
+from fver.index import targets
 from fver.util import platform as plat
 from fver.util.proc import ProcResult
 

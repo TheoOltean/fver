@@ -5,11 +5,8 @@ Settings ([backend.refinedc] in config.toml), all optional:
   coqc_bin            = "coqc"       Rocq compiler used for the audit
   dune_bin            = "dune"
   coq_root            = "refinedc.project.fver"  logical root of generated files
-  extra_check_args    = []           extra argv appended to `refinedc check`
   include_dirs        = []           extra -I directories (absolute or repo-relative)
   defines             = []           extra -D macros
-  forward_build_flags = true         forward -I/-D from the captured build
-  allowed_axioms      = []           extra axiom names the audit tolerates
 
 Always on: Cerberus's posix/ headers and fver's shim headers (-I after the
 project's own directories, plus the force-included prelude and setjmp.h), and
@@ -53,7 +50,7 @@ from fver.backends.refinedc.parse_output import (
     strip_ansi,
 )
 from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit, sha256_text
-from fver.extract.functions import extract_from_source
+from fver.index.functions import extract_from_source
 from fver.util.proc import run, version_of, which
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -131,13 +128,9 @@ class RefinedCBackend:
         self.coqc_bin: str = self.settings.get("coqc_bin", facts.COQC_BIN)
         self.dune_bin: str = self.settings.get("dune_bin", facts.DUNE_BIN)
         self.coq_root: str = self.settings.get("coq_root", facts.DEFAULT_COQ_ROOT)
-        self.extra_check_args: list[str] = list(self.settings.get("extra_check_args", []))
         self.include_dirs: list[str] = list(self.settings.get("include_dirs", []))
         self.defines: list[str] = list(self.settings.get("defines", []))
-        self.forward_build_flags: bool = bool(self.settings.get("forward_build_flags", True))
-        self.allowed_axioms = set(facts.ALLOWED_AXIOMS) | set(
-            self.settings.get("allowed_axioms", [])
-        )
+        self.allowed_axioms = set(facts.ALLOWED_AXIOMS)
         self._versions: dict[str, str] | None = None
 
     # ------------------------------------------------------------------ tools
@@ -275,7 +268,7 @@ class RefinedCBackend:
 
         if tu is not None and repo_root is not None:
             add_inc(str((Path(repo_root) / tu.source_path).parent))
-        if tu is not None and self.forward_build_flags:
+        if tu is not None:
             args = tu.arguments
             i = 1
             while i < len(args):
@@ -338,7 +331,6 @@ class RefinedCBackend:
             facts.INCLUDE_FILE_FLAG_FMT.format(file=str(self.workspace_dir / opaque.OPAQUE_HEADER))
         )
         argv += self._cpp_flags(tu, repo_root)
-        argv += self.extra_check_args
         argv.append(str(c_file))
         return argv
 

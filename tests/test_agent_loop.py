@@ -1,9 +1,9 @@
 import json
 
-from fver.agent import store
-from fver.agent.client import FakeLLMClient, FatalAgentError
-from fver.agent.loop import Verifier
 from fver.core.models import Status
+from fver.prove import store
+from fver.prove.client import FakeLLMClient, FatalAgentError
+from fver.prove.loop import Verifier
 from tests.test_agent_fakes import FakeBackend, make_ctx, make_repo, sub
 
 ACCEPT = sub("void zero(char *buf, size_t n) { /* [[fake::args(buf, n)]] FVER_ACCEPT */ }")

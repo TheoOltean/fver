@@ -20,13 +20,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fver.agent import prompts, store
-from fver.agent.loop import AttemptOutcome, Verifier
-from fver.agent.parse import BugReport, ParseError, parse_submission
 from fver.backends.base import FunctionTask, Submission
 from fver.core.context import AppContext
 from fver.core.models import Finding, FunctionInfo, Status
 from fver.ledger.memory import derive_status
+from fver.prove import prompts, store
+from fver.prove.loop import AttemptOutcome, Verifier
+from fver.prove.parse import BugReport, ParseError, parse_submission
 
 
 class ProtocolError(ValueError):
@@ -257,7 +257,7 @@ def _attempt_dict(ctx: AppContext, fn: FunctionInfo, out: AttemptOutcome, secs: 
 
 def next_functions(ctx: AppContext, limit: int | None = 10, file: str | None = None) -> dict:
     """The next functions to attempt, in dependency-aware attack-score order."""
-    from fver.commands.verify import _select
+    from fver.prove.select import _select
 
     selected = _select(ctx, [], file, limit, False, False, with_deps=True)
     items = []
@@ -312,7 +312,7 @@ def changed(ctx: AppContext, quick_scan: bool = True) -> dict[str, Any]:
     modified since the last scan. Re-runs a quick scan (no backend) first."""
     modified = _modified_files(ctx)
     if quick_scan:
-        from fver.commands.scan import run_scan
+        from fver.index.scan import run_scan
 
         run_scan(ctx, preprocess=False, translate=False, quiet=True)
     rows = ctx.ledger.list_functions(ctx.backend_name, ctx.target.key, order_by_attack_score=True)
@@ -369,7 +369,7 @@ def _modified_files(ctx: AppContext) -> set[str]:
 
 
 def scan(ctx: AppContext, translate: bool = True) -> dict[str, Any]:
-    from fver.commands.scan import run_scan
+    from fver.index.scan import run_scan
 
     index = run_scan(ctx, preprocess=True, translate=translate and ctx.backend is not None)
     return {
@@ -379,10 +379,3 @@ def scan(ctx: AppContext, translate: bool = True) -> dict[str, Any]:
         "stale": len(index.get("stale", [])),
         "build_source": index.get("build_source"),
     }
-
-
-def hunt(ctx: AppContext, file: str | None = None, only: list[str] | None = None) -> dict:
-    from fver.commands.hunt import run_hunt
-
-    findings = run_hunt(ctx, only, None, file)
-    return {"findings": [asdict(f) for f in findings], "count": len(findings)}

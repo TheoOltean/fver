@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from fver.agent import protocol
 from fver.cli import app
 from fver.core.context import AppContext
+from fver.prove import protocol
 
 ACCEPT_FN = "/* FVER_ACCEPT */\nint add(int a, int b) { return a + b; }\n"
 PLAIN_FN = "int add(int a, int b) { return a + b; }\n"
@@ -27,7 +27,7 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.chdir(root)
     runner = CliRunner()
     assert runner.invoke(app, ["init", "--backend", "null"]).exit_code == 0
-    r = runner.invoke(app, ["scan", "--no-translate", "--no-preprocess"])
+    r = runner.invoke(app, ["prove", "--dry-run"])
     assert r.exit_code == 0, r.output
     return root
 
@@ -156,7 +156,7 @@ def test_cli_commands_and_exit_codes(repo: Path) -> None:
         input="```c file=function.c\n/* FVER_ACCEPT */\nint twice(int x) { return add(x, x); }\n```\n",
     )
     assert r.exit_code == 0
-    r = runner.invoke(app, ["show", "add", "--json"])
+    r = runner.invoke(app, ["status", "-f", "add", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["function"]["status"] == "verified"
     r = runner.invoke(app, ["agent", "changed", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 0
@@ -164,19 +164,15 @@ def test_cli_commands_and_exit_codes(repo: Path) -> None:
     assert r.exit_code == 1
 
 
-def test_verify_section_of_config_supplies_defaults(repo: Path) -> None:
+def test_budget_limits_a_run_and_flags_override(repo: Path) -> None:
     runner = CliRunner()
-    assert runner.invoke(app, ["config", "set", "verify.next_limit", "1"]).exit_code == 0
-    r = runner.invoke(app, ["agent", "next", "--json"])
+    r = runner.invoke(app, ["agent", "next", "--json", "--limit", "1"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 1
-    r = runner.invoke(app, ["agent", "next", "--json", "--limit", "5"])  # the flag still wins
-    assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 2
-    assert runner.invoke(app, ["config", "set", "verify.limit", "1"]).exit_code == 0
-    r = runner.invoke(app, ["verify", "--dry-run"])
+    assert runner.invoke(app, ["config", "set", "budget.max_functions_per_run", "1"]).exit_code == 0
+    r = runner.invoke(app, ["prove", "--dry-run"])
     assert r.exit_code == 0, r.output
     assert "add" in r.output and "twice" not in r.output
-    r = runner.invoke(app, ["verify", "--dry-run", "--limit", "2"])
+    r = runner.invoke(app, ["prove", "--dry-run", "--limit", "2"])
     assert r.exit_code == 0 and "twice" in r.output
-    assert runner.invoke(app, ["config", "set", "verify.task_reference", "false"]).exit_code == 0
-    r = runner.invoke(app, ["agent", "task", "add"])
+    r = runner.invoke(app, ["agent", "task", "add", "--no-reference"])
     assert r.exit_code == 0 and "# Task: prove `add`" in r.output and "rc::" not in r.output

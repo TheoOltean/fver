@@ -17,18 +17,11 @@ from pathlib import Path
 from fver.util.proc import which
 
 # Package manager -> command prefix. Order matters: the first one found wins.
-_MANAGERS: list[tuple[str, str]] = [
+_MANAGERS: list[tuple[str, str]] = [  # the ones `fver setup` supports
     ("brew", "brew install"),
     ("apt-get", "sudo apt-get install -y"),
     ("dnf", "sudo dnf install -y"),
-    ("yum", "sudo yum install -y"),
     ("pacman", "sudo pacman -S --needed"),
-    ("zypper", "sudo zypper install -y"),
-    ("apk", "sudo apk add"),
-    ("pkg", "sudo pkg install -y"),  # FreeBSD
-    ("pkgin", "sudo pkgin install"),  # NetBSD / pkgsrc
-    ("pkg_add", "doas pkg_add"),  # OpenBSD
-    ("nix-env", "nix-env -iA nixpkgs."),
 ]
 
 

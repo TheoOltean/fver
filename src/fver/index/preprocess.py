@@ -10,7 +10,7 @@ from fver.core.models import TranslationUnit
 from fver.core.workspace import Workspace
 from fver.util.proc import run
 
-log = logging.getLogger("fver.build")
+log = logging.getLogger("fver.index")
 
 # Flags that take a separate argument and must be dropped together with it.
 _DROP_WITH_ARG = {"-o", "-MF", "-MT", "-MQ"}

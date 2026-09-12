@@ -1,4 +1,4 @@
-"""Tests for fver.build: compile_commands, preprocess, targets."""
+"""Tests for fver.index: compile_commands, preprocess, targets."""
 
 from __future__ import annotations
 
@@ -8,17 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from fver.build import targets
-from fver.build.compile_commands import (
+from fver.core.config import BuildConfig, FverConfig
+from fver.core.models import Target, TranslationUnit
+from fver.core.workspace import Workspace
+from fver.index import targets
+from fver.index.compile_commands import (
     capture_build,
     is_included,
     parse_compile_commands,
     synthesise,
 )
-from fver.build.preprocess import preprocess_argv, preprocess_tu
-from fver.core.config import BuildConfig, FverConfig
-from fver.core.models import Target, TranslationUnit
-from fver.core.workspace import Workspace
+from fver.index.preprocess import preprocess_argv, preprocess_tu
 from fver.util.proc import ProcResult
 
 FIXTURE = Path(__file__).parent / "fixtures" / "miniproj"
@@ -178,7 +178,7 @@ def test_run_scan_end_to_end_without_backend(repo: Path, monkeypatch: pytest.Mon
     extraction, callgraph, scoring, ledger upserts and the index file."""
     from types import SimpleNamespace
 
-    from fver.commands.scan import run_scan
+    from fver.index.scan import run_scan
     from fver.ledger.memory import InMemoryLedger
 
     monkeypatch.chdir(repo)
@@ -210,7 +210,7 @@ def test_run_scan_end_to_end_without_backend(repo: Path, monkeypatch: pytest.Mon
 
 
 def test_capture_redirects_bear_output_into_work_dir(tmp_path):
-    from fver.build.compile_commands import _bear_with_output
+    from fver.index.compile_commands import _bear_with_output
 
     out = tmp_path / "cc.json"
     assert _bear_with_output("bear -- make", out) == f"bear --output {out} -- make"

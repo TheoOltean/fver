@@ -1,5 +1,5 @@
-from fver.agent.parse import BugReport, ParseError, parse_submission
 from fver.backends.base import SubmissionSpec
+from fver.prove.parse import BugReport, ParseError, parse_submission
 
 SPEC = SubmissionSpec(
     files={"function.c": "annotated C", "extra.v": "helper lemmas"},

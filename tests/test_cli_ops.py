@@ -6,12 +6,13 @@ import pytest
 from typer.testing import CliRunner
 
 from fver.cli import app
-from fver.commands import clean as clean_cmd
-from fver.commands import config_cmd, doctor, hunt
-from fver.commands import docs as docs_cmd
+from fver.commands import config_cmd
+from fver.core import doctor
+from fver.core import guide as docs_cmd
 from fver.core.config import FverConfig, HuntersConfig, load_config
 from fver.core.models import Finding, FunctionInfo, Status, Target, TranslationUnit
 from fver.core.workspace import Workspace
+from fver.prove import hunt
 from fver.util import proc
 
 runner = CliRunner()
@@ -44,7 +45,7 @@ def test_init_creates_layout_and_detects_makefile(repo):
         "### `fver prove`",
         "### `fver agent check`",
         "`--submission`",
-        "[verify]",
+        "[budget]",
         "## Goal",
     ):
         assert needle in readme
@@ -66,10 +67,8 @@ def test_init_creates_layout_and_detects_makefile(repo):
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]
 
 
-def test_init_refuses_overwrite_without_force(repo):
+def test_init_force_resets_config(repo):
     assert runner.invoke(app, ["init"]).exit_code == 0
-    r = runner.invoke(app, ["init"])
-    assert r.exit_code == 1 and "already exists" in r.output
     r = runner.invoke(app, ["init", "--force", "--backend", "null", "--name", "other"])
     assert r.exit_code == 0
     cfg = load_config(repo)
@@ -82,8 +81,8 @@ def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch)
     (d / "CMakeLists.txt").write_text("project(x C)")
     monkeypatch.chdir(d)
     monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
-    from fver.build.detect import detect_build, resolve_build
     from fver.core.config import BuildConfig
+    from fver.index.detect import detect_build, resolve_build
 
     r = runner.invoke(app, ["init"])
     assert r.exit_code == 0 and "CMake project" in r.output
@@ -108,9 +107,8 @@ def test_config_get_set_roundtrip(repo):
     assert load_config(repo).model.effort == "xhigh"
     assert runner.invoke(app, ["config", "set", "hunters.cbmc_unwind", "12"]).exit_code == 0
     assert load_config(repo).hunters.cbmc_unwind == 12
-    assert runner.invoke(app, ["config", "set", "verify.limit", "5"]).exit_code == 0
-    assert runner.invoke(app, ["config", "set", "verify.follow_callees", "false"]).exit_code == 0
-    assert load_config(repo).verify.limit == 5 and load_config(repo).verify.follow_callees is False
+    assert runner.invoke(app, ["config", "set", "budget.max_functions_per_run", "5"]).exit_code == 0
+    assert load_config(repo).budget.max_functions_per_run == 5
     assert (
         runner.invoke(app, ["config", "set", "budget.max_usd_per_function", "2.5"]).exit_code == 0
     )
@@ -118,10 +116,6 @@ def test_config_get_set_roundtrip(repo):
     assert runner.invoke(app, ["config", "set", "build.include", '["src/**/*.c"]']).exit_code == 0
     assert load_config(repo).build.include == ["src/**/*.c"]
     # bare strings and backend tables
-    assert (
-        runner.invoke(app, ["config", "set", "hunters.test_command", "make check"]).exit_code == 0
-    )
-    assert load_config(repo).hunters.test_command == "make check"
     assert (
         runner.invoke(app, ["config", "set", "backend.refinedc.refinedc_bin", "/opt/rc"]).exit_code
         == 0
@@ -155,14 +149,17 @@ def test_config_set_never_copies_user_settings_into_the_project(repo):
     assert project.count("\n\n\n") == 0  # no double blank lines
 
 
-def test_docs_command_prints_and_refreshes_readme(repo):
+def test_init_again_refreshes_the_guide_and_keeps_the_config(repo):
     assert runner.invoke(app, ["init"]).exit_code == 0
-    r = runner.invoke(app, ["docs"])
-    assert r.exit_code == 0 and "### `fver verify`" in r.output and "[budget]" in r.output
-    readme = repo / ".fver" / "GUIDE.md"
-    readme.write_text("stale")
-    r = runner.invoke(app, ["docs", "--write"])
-    assert r.exit_code == 0 and readme.read_text() == docs_cmd.render_docs()
+    assert runner.invoke(app, ["config", "set", "budget.max_usd_per_run", "7"]).exit_code == 0
+    guide = repo / ".fver" / "GUIDE.md"
+    guide.write_text("stale")
+    r = runner.invoke(app, ["init"])
+    assert r.exit_code == 0 and "Refreshed GUIDE.md" in r.output
+    assert guide.read_text() == docs_cmd.render_docs()
+    assert load_config(repo).budget.max_usd_per_run == 7
+    assert runner.invoke(app, ["init", "--force"]).exit_code == 0
+    assert load_config(repo).budget.max_usd_per_run == 200
 
 
 def test_prover_workflow_matches_claude_skill():
@@ -185,30 +182,6 @@ def test_parse_value():
 # --- clean --------------------------------------------------------------
 
 
-def test_clean_removes_only_derived_state(repo):
-    runner.invoke(app, ["init"])
-    ws = Workspace.open(repo)
-    (ws.work_dir / "x").write_text("x")
-    (ws.proofs_dir / "p").write_text("p")
-    ws.ledger_path.write_text("db")
-    r = runner.invoke(app, ["clean"])
-    assert r.exit_code == 0, r.output
-    assert not ws.work_dir.exists() and not ws.cache_dir.exists()
-    assert (ws.proofs_dir / "p").exists() and ws.ledger_path.exists()
-    r = runner.invoke(app, ["clean", "--all", "--yes"])
-    assert r.exit_code == 0
-    assert not ws.proofs_dir.exists() and not ws.ledger_path.exists()
-    assert (repo / "src" / "a.c").exists()
-
-
-def test_clean_never_deletes_outside_workspace(repo):
-    runner.invoke(app, ["init"])
-    ws = Workspace.open(repo)
-    with pytest.raises(PermissionError):
-        clean_cmd._remove(ws, repo / "src")
-    assert (repo / "src" / "a.c").exists()
-
-
 # --- doctor -------------------------------------------------------------
 
 
@@ -217,10 +190,9 @@ def test_doctor_exit_codes(repo, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.setattr(proc, "which", lambda n: None)
-    r = runner.invoke(app, ["doctor"])
-    assert r.exit_code == 1 and "missing" in r.output
-    assert "optional" not in r.output  # every tool is required; credentials are informational
-    assert "not set" in r.output
+    rows0, _ = doctor.collect_statuses()
+    assert any(x.required and not x.found for x in rows0)
+    assert doctor.render(rows0) == 1
     monkeypatch.setattr(proc, "which", lambda n: f"/usr/bin/{n}")
     monkeypatch.setattr(
         proc, "run", lambda argv, **kw: proc.ProcResult(argv, 0, "tool 1.0\n", "", 0.0)
@@ -330,7 +302,7 @@ def test_hunt_records_findings_and_bug_claims(repo, monkeypatch):
     tu = TranslationUnit("tu1", "src/a.c", str(repo), ["clang", "src/a.c"])
     fns = [FunctionInfo("tu1:f", "f", "tu1", "src/a.c", 1, 1, "int f(void)", "bh")]
     ledger = FakeLedger([tu], fns)
-    monkeypatch.setattr(hunt, "enabled_hunters", lambda cfg, only=None: [FakeHunter()])
+    monkeypatch.setattr(hunt, "CbmcHunter", FakeHunter)
     findings = hunt.run_hunt(FakeCtx(ws, ledger), None, None, None)
     assert len(findings) == 3 and len(ledger.findings) == 3
     assert all(f.run_id == "run1" for f in ledger.findings)

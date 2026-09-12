@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from fver import tui
 from fver.cli import app
 from fver.core.context import AppContext
+from fver.prove import hunt as hunt_mod
 
 SRC = "int add(int a, int b) { return a + b; }\nint twice(int x) { return add(x, x); }\n"
 ACCEPT = "```c file=function.c\n/* FVER_ACCEPT */\n{body}\n```"
@@ -28,11 +29,11 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     assert runner.invoke(app, ["init", "--backend", "null"]).exit_code == 0
-    assert runner.invoke(app, ["scan", "--no-translate", "--no-preprocess"]).exit_code == 0
+    assert runner.invoke(app, ["prove", "--dry-run"]).exit_code == 0
     fake = root / ".fver" / "fake.json"
     fake.write_text(json.dumps([ACCEPT.format(body="int add(int a, int b) { return a + b; }")]))
     monkeypatch.setenv("FVER_FAKE_LLM", str(fake))
-    assert runner.invoke(app, ["verify", "--function", "add", "--parallel", "1"]).exit_code == 0
+    assert runner.invoke(app, ["prove", "add", "--plain"]).exit_code == 0
     return root
 
 
@@ -88,7 +89,6 @@ async def _check_worker(repo: Path, monkeypatch) -> None:
     fake.write_text(json.dumps([ACCEPT.format(body="int twice(int x) { return add(x, x); }")]))
     monkeypatch.setenv("FVER_FAKE_LLM", str(fake))
     from fver.commands.prove import run_prove
-    from fver.hunters import base as hunters_base
 
     class NoHunter:
         name = "cbmc"
@@ -99,7 +99,7 @@ async def _check_worker(repo: Path, monkeypatch) -> None:
         def run(self, *a, **k):
             return []
 
-    monkeypatch.setattr(hunters_base, "builtin_hunters", lambda: {"cbmc": NoHunter})
+    monkeypatch.setattr(hunt_mod, "CbmcHunter", NoHunter)
 
     def worker(on_done) -> int:
         ctx = AppContext.load(repo, need_backend=True)

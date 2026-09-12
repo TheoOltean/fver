@@ -14,7 +14,7 @@ from fver.core.config import BuildConfig
 from fver.core.models import TranslationUnit
 from fver.util.proc import run_shell
 
-log = logging.getLogger("fver.build")
+log = logging.getLogger("fver.index")
 
 _CANDIDATES = ("compile_commands.json", "build/compile_commands.json")
 
@@ -185,7 +185,7 @@ def capture_build(
     """The full policy: configured path, then discovery, then capture command,
     then synthesis. `work_dir` (normally <repo>/.fver/work) receives anything
     the capture command produces so the user's tree stays untouched."""
-    from fver.build.detect import resolve_build
+    from fver.index.detect import resolve_build
 
     repo_root = repo_root.resolve()
     warnings: list[str] = []

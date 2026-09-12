@@ -1,6 +1,6 @@
 import pytest
 
-from fver.agent.pricing import cost_from_usage, price_for, usd_for
+from fver.prove.pricing import cost_from_usage, price_for, usd_for
 
 
 def test_fable_prices():

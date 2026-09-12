@@ -1,4 +1,4 @@
-"""fver doctor: check external tools and API credentials."""
+"""Tool and credential checks (`fver setup` runs and prints them)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import os
 import platform
 import sys
 
-import typer
 from rich.table import Table
 
 from fver.core.models import ToolStatus
@@ -97,10 +96,9 @@ def collect_statuses(online: bool = False) -> tuple[list[ToolStatus], str | None
     )
     rows.append(_tool("bear", True, "run `fver setup`"))
     try:
-        from fver.hunters.base import builtin_hunters
+        from fver.prove.cbmc import CbmcHunter
 
-        for cls in builtin_hunters().values():
-            rows.extend(cls().doctor())
+        rows.extend(CbmcHunter().doctor())
     except Exception as e:  # pragma: no cover  # noqa: BLE001
         rows.append(ToolStatus("hunters", False, required=False, hint=str(e)))
     if ctx is not None and ctx.backend is not None:
@@ -150,19 +148,6 @@ def render(rows: list[ToolStatus]) -> int:
         table.add_row(r.name, status, r.version or r.path or "", "" if r.found else r.hint)
     console.print(table)
     return 1 if missing_required else 0
-
-
-def register(app: typer.Typer) -> None:
-    @app.command("doctor", hidden=True)
-    def doctor(
-        online: bool = typer.Option(
-            False, "--online", help="Also make one small API call to verify credentials."
-        ),
-    ) -> None:
-        """Check that every tool fver needs is installed (see `fver setup`) and whether API credentials are set."""
-        rows, _ = collect_statuses(online=online)
-        code = render(rows)
-        raise typer.Exit(code=code)
 
 
 def _config_api_key() -> str | None:

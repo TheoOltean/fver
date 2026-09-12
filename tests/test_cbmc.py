@@ -6,7 +6,7 @@ import pytest
 
 from fver.core.config import HuntersConfig
 from fver.core.models import FunctionInfo, TranslationUnit
-from fver.hunters import base, cbmc, sanitizers
+from fver.prove import cbmc
 from fver.util import proc
 
 FIX = Path(__file__).parent / "fixtures" / "hunters"
@@ -66,7 +66,7 @@ def _tu(repo: Path, with_main: bool = False, tu_id: str = "tu1") -> TranslationU
 
 def test_preprocessor_flags_keep_only_pp_flags(tmp_path):
     tu = _tu(tmp_path)
-    assert base.preprocessor_flags(tu.arguments) == [
+    assert cbmc.preprocessor_flags(tu.arguments) == [
         "-Isrc",
         "-DFOO=1",
         "-std=c11",
@@ -76,20 +76,12 @@ def test_preprocessor_flags_keep_only_pp_flags(tmp_path):
 
 
 def test_locator_maps_lines_to_functions():
-    loc = base.FunctionLocator(_functions())
+    loc = cbmc.FunctionLocator(_functions())
     assert loc.locate("src/buf.c", 12).name == "copy"
     assert loc.locate("src/buf.c", 20).name == "add"
     assert loc.locate("src/buf.c", 16) is None
     assert loc.locate("other.c", 12) is None
     assert loc.by_name("add").id == "tu1:add"
-
-
-def test_enabled_hunters_cbmc_always_sanitizers_with_test_command():
-    assert [h.name for h in base.enabled_hunters(HuntersConfig())] == ["cbmc"]
-    cfg = HuntersConfig(test_command="make test")
-    assert [h.name for h in base.enabled_hunters(cfg)] == ["cbmc", "sanitizers"]
-    assert [h.name for h in base.enabled_hunters(HuntersConfig(), ["sanitizers"])] == ["sanitizers"]
-    assert base.enabled_hunters(cfg, ["nope"]) == []
 
 
 # --- cbmc ---------------------------------------------------------------
@@ -182,52 +174,6 @@ def test_cbmc_absent_and_timeout(tmp_path, monkeypatch):
     )
 
 
-# --- sanitizers ---------------------------------------------------------
-
-
-def test_sanitizer_parsing(tmp_path):
-    repo = tmp_path / "repo"
-    (repo / "src").mkdir(parents=True)
-    text = (FIX / "sanitizer_output.txt").read_text().replace("/repo/", str(repo) + "/")
-    recs = sanitizers.parse_sanitizer_output(text, repo)
-    assert [(r["kind"], r["file"], r["line"]) for r in recs] == [
-        ("signed_overflow", "src/buf.c", 20),
-        ("out_of_bounds", "src/buf.c", 12),
-    ]
-    assert "SUMMARY" in recs[1]["witness"]
-
-
-def test_sanitizer_has_nothing_to_run_without_test_command(tmp_path):
-    h = sanitizers.SanitizerHunter()
-    assert h.run([], [], tmp_path, tmp_path / "w", HuntersConfig()) == []
-
-
-def test_sanitizer_runs_tests_with_flags(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    (repo / "src").mkdir(parents=True)
-    seen: dict = {}
-    text = (FIX / "sanitizer_output.txt").read_text().replace("/repo/", str(repo) + "/")
-
-    def fake_shell(cmd, cwd=None, timeout=None, env=None):
-        seen["cmd"] = cmd
-        seen["env"] = env or {}
-        return proc.ProcResult([cmd], 1, text, "", 0.1)
-
-    from fver.util import platform as plat
-
-    monkeypatch.setattr(proc, "run_shell", fake_shell)
-    monkeypatch.setattr(plat, "find_compiler", lambda: "cc")
-    monkeypatch.setattr(plat, "compiler_supports", lambda cc, flags: True)
-    cfg = HuntersConfig(test_command="make test")
-    findings = sanitizers.SanitizerHunter().run([], _functions(), repo, tmp_path / "w", cfg)
-    assert seen["cmd"] == "make test"
-    assert "fsanitize=address,undefined" in seen["env"]["CFLAGS"]
-    assert "fsanitize=address,undefined" in seen["env"]["LDFLAGS"]
-    assert seen["env"]["CC"]
-    assert [f.function_id for f in findings] == ["tu1:add", "tu1:copy"]
-    assert (tmp_path / "w" / "tests.log").exists()
-
-
 @pytest.mark.parametrize(
     "pclass,desc,kind",
     [
@@ -243,7 +189,7 @@ def test_cbmc_classify(pclass, desc, kind):
 
 
 def test_cbmc_flags_translate_and_drop():
-    from fver.hunters.cbmc import cbmc_flags
+    from fver.prove.cbmc import cbmc_flags
 
     argv = [
         "gcc",
@@ -279,7 +225,7 @@ def test_cbmc_flags_translate_and_drop():
 
 
 def test_cbmc_tool_error_detection():
-    from fver.hunters.cbmc import tool_error
+    from fver.prove.cbmc import tool_error
 
     assert tool_error("Usage error!\n* * CBMC 6 * *\nUsage:\n cbmc [-?] --unknown option", "", 6)
     err_json = '[{"messageText": "PARSING ERROR", "messageType": "ERROR"}]'
@@ -290,8 +236,7 @@ def test_cbmc_tool_error_detection():
 
 
 def test_missing_body_is_informational():
-    from fver.hunters.base import UB_KINDS
-    from fver.hunters.cbmc import classify
+    from fver.prove.cbmc import UB_KINDS, classify
 
     kind = classify("pointer dereference", "no body for callee lua_pushlstring")
     assert kind == "missing_body" and kind not in UB_KINDS

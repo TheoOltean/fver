@@ -1,6 +1,6 @@
-from fver.agent import store
 from fver.backends.base import CheckOutcome, CheckResult, FunctionTask, Submission
 from fver.core.models import Status
+from fver.prove import store
 from tests.test_agent_fakes import make_repo
 
 

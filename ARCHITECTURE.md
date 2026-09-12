@@ -2,53 +2,35 @@
 
 fver is a CLI you run inside a C repository. It proves, function by
 function, that the code cannot exhibit undefined behaviour, using an LLM to
-write annotations/proofs and a proof checker to accept or reject them. It
-never modifies user files: all state lives in `<repo>/.fver/`.
+write annotations and a proof checker (RefinedC on Rocq) to accept or reject
+them. It never modifies user files: all state lives in `<repo>/.fver/`.
 
-## Module map (src/fver/)
+## Packages (src/fver/)
 
-| Module | Owns | Knows about backend? |
+| Package | Owns | Knows the backend? |
 |---|---|---|
-| `core/models.py` | Domain vocabulary: Target, TranslationUnit, FunctionInfo, Claim, Finding, Status, Cost | no |
-| `core/config.py` | `.fver/config.toml` schema (pydantic), loading, saving. Run-shaping defaults live here (`[verify]`, `[budget]`, `[model]`, `[hunters]`); CLI flags are one-run overrides and default to None so the config wins | no (opaque `[backend.<name>]` table) |
-| `core/workspace.py` | `.fver/` layout, write guard (refuses to write outside `.fver/`) | no |
-| `core/context.py` | `AppContext.load()` = workspace + config + ledger + backend | constructs it via registry only |
-| `build/` | Build capture: `detect.py` infers the build at scan time (compile_commands.json, `bear -- make`, CMake/Meson export dirs, fallback flags) unless `[build]` names a source of flags; per-TU preprocessing; target detection | no |
-| `extract/` | Function extraction (tree-sitter), call graph, attack-surface ranking | no |
-| `ledger/api.py` | `Ledger` protocol; `ledger/sqlite.py` implements it; `ledger/cache.py` cache keys; `ledger/report.py` | no |
-| `backends/base.py` | The `Backend` protocol + Submission/CheckResult/FunctionTask/PromptContext | this IS the boundary |
-| `backends/registry.py` | Discovery via entry points (`fver.backends` group) + built-ins | by name only |
-| `backends/refinedc/` | RefinedC on Rocq. Annotation splicing, `refinedc check` invocation, output parsing, guardrails, prompt reference | yes |
-| `backends/refinedc/opaque.py` | Opaque floating point: rewrites `float`/`double`/`long double` to same-size structs in the TU copy and in shadow copies of project headers (`<workspace>/shadow/`, placed before the real include dirs); generates `fver_opaque.h`. Float-computing functions become unsupported; everything else in the file stays checkable | yes |
-| `backends/refinedc/shims/` | Header shims for the Cerberus front-end: POSIX headers it lacks (`-I` after project dirs) and `setjmp.h` (force-included under Cerberus's own guard because Cerberus's copy ends in `#error`) | yes |
-| `backends/null.py` | A fake backend for tests and pipeline dry runs | yes (trivially) |
-| `hunters/` | Bug finders: CBMC always; sanitizers over the project's tests when `hunters.test_command` is set. Produce `Finding`s | no |
-| `agent/` | Anthropic client, prompt assembly, the propose -> check -> repair loop, retrieval of examples, budget, cheating detection | only via `Backend` |
-| `agent/protocol.py` | The agent protocol: task packaging, check, next, changed as dicts; shared by CLI and MCP | only via `Backend` |
-| `mcp/server.py` | MCP server over the protocol (`fver mcp`) | no |
-| `agent/invalidate.py` | Stale-proof tracking: explicit STALE claims when a body, callee contract, external spec or tool version changed; caller invalidation after a contract change | only via `Backend` |
-| `commands/prove.py` | `fver prove [TARGET...]`: resolve targets (repo, files, functions, globs), re-index if sources changed, CBMC over the selection, then the proof loop in dependency order. The only day-to-day verb besides `status` | via AppContext |
-| `tui.py` | The Textual view: tree of dirs/files/functions by status, detail pane, coverage/cost bar. `fver status` opens it read-only; `fver prove` runs the pipeline in a worker thread behind it and refreshes as claims land | no |
-| `commands/` | One module per subcommand, each with `register(app)`. Visible: setup, init, prove, status, report, mcp, config. Hidden (still work, documented in GUIDE.md under Advanced): scan, hunt, verify, show, doctor, docs, clean, and the `agent` group (task, check, next, changed) | via AppContext |
-| `commands/setup.py` | `fver setup`: installs every external tool (package manager for bear/cbmc/opam, then an opam switch `fver` with Rocq, Iris, Cerberus and RefinedC at pinned commits) and records the binary paths in the user config. Nothing is optional: missing tools are errors, never silently skipped | no |
-| `commands/docs.py` | `fver docs` and the `.fver/GUIDE.md` that `fver init` writes: layout, command reference generated from the Typer app, config reference from the pydantic defaults, prover workflow (mirrored by `.claude/skills/fver/SKILL.md`, test-enforced) | no |
-| `cli.py` | Typer app; imports command modules | no |
+| `core/` | `models.py` domain vocabulary (Target, TranslationUnit, FunctionInfo, Claim, Finding, Status, Cost); `config.py` the `.fver/config.toml` schema and the commented writer; `workspace.py` the `.fver/` layout and the write guard; `context.py` `AppContext.load()` = workspace + config + ledger + backend + detected target; `doctor.py` tool checks; `guide.py` the generated `GUIDE.md` | constructs it via the registry only |
+| `index/` | Everything that turns a repository into indexed functions: `detect.py` infers the build (compile_commands.json, `bear -- make`, CMake/Meson export dirs, fallback flags), `compile_commands.py` captures it, `preprocess.py`, `targets.py` detects the ABI, `functions.py` extracts functions (tree-sitter), `callgraph.py`, `attack_surface.py` ranks them, `scan.py` runs the whole index and asks the backend what it can represent | no |
+| `prove/` | The proof pipeline: `select.py` chooses and orders functions (callees first), `hunt.py` + `cbmc.py` run CBMC over a selection, `loop.py` the propose -> check -> repair loop (`Verifier`), `client.py` the Anthropic client (cost, caching, refusals, transcripts), `prompts.py`, `retrieval.py` few-shot examples from accepted proofs, `store.py` saved submissions, `invalidate.py` staleness, `protocol.py` the session-mode protocol (task, check, next, changed, status, show) shared by the CLI and MCP | only via `Backend` |
+| `backends/` | `base.py` the `Backend` protocol (the boundary), `registry.py` (two built-ins), `null.py` for tests, `refinedc/` the real one: front-end driving, annotation splicing, guardrails, audit, `opaque.py` opaque floats, `shims/`, `prompts/` | this IS the boundary |
+| `ledger/` | `api.py` the `Ledger` protocol, `sqlite.py` the implementation (WAL, concurrent workers), `memory.py` for tests, `cache.py` cache keys, `report.py` markdown/JSON export | no |
+| `mcp/` | `server.py`: the protocol over stdio for Claude Code | no |
+| `tui.py` | The Textual view behind `fver status` and `fver prove` | no |
+| `commands/` | Thin typer wrappers: `setup`, `init`, `prove`, `status`, `config`, `mcp`, and the hidden `agent` group (task, check, next, changed) | via AppContext |
 
 ## Data flow
 
 ```
-fver prove  : [scan if stale] -> hunt over the selection -> verify in dependency order
-fver scan   : build/ -> extract/ -> ledger (TUs, functions) -> backend.translate -> ledger (unsupported)
-fver hunt   : hunters/ -> ledger (findings, BUG_FOUND claims)
-fver verify : ledger (next functions) -> agent.loop(backend) -> proofs/ + ledger (claims)
-fver status : ledger -> tui (or a table off a terminal)
+fver prove  : index/scan (if stale) -> prove/hunt (CBMC) -> prove/select -> prove/loop(backend) -> proofs/ + ledger
+fver status : ledger -> tui (or a table / markdown / JSON off a terminal)
+fver agent  : prove/protocol -> the same loop pieces, one step at a time, for a session
 ```
 
 ## Proof lifecycle
 
 A claim's status is derived, not stored: a VERIFIED claim whose `body_hash`
 differs from the function's current hash reads as STALE (`ledger/memory.py:
-derive_status`). `fver scan` then calls `agent/invalidate.reconcile`, which
+derive_status`). Indexing then calls `prove/invalidate.reconcile`, which
 records explicit STALE claims (with reasons) and also catches cache-key drift
 from callee contracts, external specs and tool versions. When the loop
 re-verifies a function with a different contract, it marks every verified
@@ -56,70 +38,62 @@ caller STALE immediately. A caller proven while its callee is stale carries
 the assumption `callee-contract-unverified:<name>` until the callee is
 re-verified.
 
-## Verification order
+## Order of work
 
-`fver verify` ranks by attack score, then pulls each selected function's
+`fver prove` ranks by attack score, then pulls each selected function's
 not-yet-verified internal callees in front of it (post-order over the call
 graph, cycles cut at the first repeat), so a caller is attempted only once
-its callees have contracts. `--no-deps` disables this. External callees
-(libc, other libraries) are never pulled in; they need trusted specs under
-`.fver/external/`.
+its callees have contracts. External callees (libc, other libraries) are
+never pulled in; they need trusted specs under `.fver/external/`. Naming a
+function explicitly also retries one an earlier run left unresolved.
 
-## Bug-hunter semantics
+## CBMC before the prover
 
-There are two hunters: CBMC, which always runs, and the sanitizers, which rebuild and run the project's own tests and therefore need `hunters.test_command`. Hunters produce `Finding`s with a `confidence`. CBMC run from a real `main`
-yields `high`; CBMC run per function with unconstrained inputs yields `low`
-(the reported violation may be a precondition every caller satisfies). Only
-high-confidence findings of a UB kind become `bug_found` claims. Each hunt
-run replaces that hunter's previous findings for the files it covered, and a
-function whose earlier hunter-issued `bug_found` is not reproduced gets a
-superseding claim. `missing_body`, `bound_reached` and `tool_error` are informational kinds.
+`prove/hunt.py` runs CBMC over the selected functions first. Run from a real
+`main`, a hit is a real bug (`high` confidence) and the function is recorded
+`bug_found` and not sent to the prover; run per function with unconstrained
+inputs, a hit is `low` confidence (the reported violation may be a
+precondition every caller satisfies) and is recorded without changing the
+status. `missing_body`, `bound_reached` and `tool_error` are informational.
 
 ## Rescans
 
-`fver scan` prunes translation units and functions that are no longer in
-the build (their claim and finding history stays). Build captures are kept
-under `.fver/work/compile_commands.json`; a capture that compiled nothing
-(build already up to date) reuses the previous good one so function ids stay
-stable across scans.
+Indexing prunes translation units and functions that are no longer in the
+build (their claim and finding history stays). Build captures are kept under
+`.fver/work/compile_commands.json`; a capture that compiled nothing (build
+already up to date) reuses the previous good one so function ids stay stable.
+The detected target is cached in `.fver/work/target.json`.
 
-## External provers (session mode)
+## Session mode
 
-`agent/protocol.py` exposes the loop's building blocks as functions returning
-dicts: `reference`, `task`, `check`, `next_functions`, `changed`, `status`,
-`show`, `scan`, `hunt`. `Verifier.attempt_submission` is the single
-guardrail -> check -> audit -> save step used by both the API loop and
-`Verifier.submit` (external prover; zero LLM cost, `extra["prover"] =
-"external"`). `commands/agent_cmds.py` (`fver task|check|next|changed`) and
-`mcp/server.py` (`fver mcp`, stdio, optional dependency `fver[mcp]`) are
-thin wrappers over the protocol, so a Claude Code session, a script and the
-built-in loop are judged identically. `.claude/skills/fver/SKILL.md` is the
-workflow for a session.
+`prove/protocol.py` exposes the loop's building blocks as functions returning
+dicts. `Verifier.attempt_submission` is the single guardrail -> check -> audit
+-> save step used by both the API loop and external submissions (zero LLM
+cost, `extra["prover"] = "external"`). `fver agent ...` and `fver mcp` are
+thin wrappers over it, so a Claude Code session, a script and the built-in
+loop are judged identically. `.claude/skills/fver/SKILL.md` is the workflow
+for a session and mirrors the text in `core/guide.py` (test-enforced).
 
 ## Offline trials
 
-`FVER_FAKE_LLM=<json file with a list of scripted responses> fver verify`
+`FVER_FAKE_LLM=<json file with a list of scripted responses> fver prove`
 substitutes a scripted client so the whole pipeline can be exercised with the
 `null` backend and no API calls. Never use it for real verification.
 
-## Contracts subagents must respect
+## Contracts
 
-- Only `backends/<name>/` may import that backend's tools. The agent loop
-  and commands use `Backend` methods exclusively.
+- Only `backends/refinedc/` may import RefinedC's tools. The loop and the
+  commands use `Backend` methods exclusively.
 - Only `ledger/sqlite.py` imports sqlite3.
 - Anything that writes files goes through `Workspace` paths, and calls
   `ws.assert_not_user_file(path)` if the path came from outside.
-- Every LLM call goes through `agent/client.py` (cost accounting, caching,
-  refusal handling, retries live there).
-- `FunctionInfo.body_hash` is computed once in `extract/` and is the basis
-  of the cache key in `ledger/cache.py`.
+- Every LLM call goes through `prove/client.py`.
+- `FunctionInfo.body_hash` is computed once in `index/` and is the basis of
+  the cache key in `ledger/cache.py`.
 - Accepted submissions are stored under `.fver/proofs/<source path>/<fn>/`
   as the submission files plus `result.json` (CheckResult fields + cache key).
-- Tests use the `null` backend and never require external tools or network.
-
-## Adding a backend
-
-Implement `fver.backends.base.Backend`, register it under the
-`fver.backends` entry-point group (or add to `_BUILTIN` in registry.py),
-and put its settings under `[backend.<name>]` in config.toml. Nothing else
-changes.
+- Tests use the `null` backend and never require external tools or network;
+  `tests/integration/` runs against a real RefinedC when `FVER_REFINEDC_BIN`
+  is set.
+- Nothing is optional: a missing tool is an error (`fver setup` installs
+  everything), never a silently degraded result.

@@ -1,9 +1,9 @@
-"""`fver docs`: the documentation that `fver init` writes to `.fver/GUIDE.md`.
+"""The documentation that `fver init` writes to `.fver/GUIDE.md`.
 
 The file is meant to be read by whoever works in the repository next, human
 or model: the `.fver/` layout, every command with its options (generated
 from the CLI itself so it cannot drift), every configuration key with its
-default, and the session-mode proving workflow. `fver docs --write`
+default, and the session-mode proving workflow. Running `fver init` again
 refreshes it after an upgrade.
 """
 
@@ -188,8 +188,7 @@ def config_reference() -> str:
         "\n"
         "Sections: `[project]` backend and property class; `[build]` how to find or\n"
         "capture the build; `[target]` the ABI the proofs are for; `[model]` which LLM\n"
-        "and how; `[budget]` money and attempt limits; `[verify]` defaults for `fver\n"
-        "verify`, `fver next` and `fver task`; `[hunters]` which bug finders run;\n"
+        "and how; `[budget]` money, attempt and size limits; `[hunters]` CBMC settings;\n"
         "`[backend.<name>]` settings passed to the proof backend.\n"
         "\n"
         "Every key with its default:\n"
@@ -202,23 +201,3 @@ def config_reference() -> str:
 
 def render_docs() -> str:
     return "\n".join([LAYOUT, command_reference(), config_reference(), PROVER_WORKFLOW])
-
-
-def register(app: typer.Typer) -> None:
-    @app.command("docs", hidden=True)
-    def docs(
-        write: bool = typer.Option(
-            False, "--write", help="Refresh .fver/GUIDE.md instead of printing."
-        ),
-    ) -> None:
-        """Print the command, configuration and workflow reference (what `fver init` writes to .fver/GUIDE.md)."""
-        text = render_docs()
-        if not write:
-            typer.echo(text)
-            return
-        from fver.core.workspace import Workspace
-
-        ws = Workspace.open()
-        path = ws.root / "GUIDE.md"
-        path.write_text(text, encoding="utf-8")
-        typer.echo(f"wrote {path}")

@@ -1,18 +1,12 @@
 """fver command-line entry point.
 
-fver setup     install every external tool (bear, cbmc, opam switch with RefinedC)
-fver init      create .fver/ in the current repository
-fver doctor    check external tools and API credentials
-fver prove     the one verb: index if needed, CBMC first, then prove (repo, file or function)
-fver scan      capture the build, index functions, run the backend front-end
-fver hunt      run bug finders (CBMC, Cerberus, sanitizers) over the code
-fver verify    run the LLM proof loop over unverified functions
-fver status    summary of what is proven
-fver show      details for one function
-fver report    write a full report (markdown / json)
-fver clean     remove derived state (never user files)
+fver setup     install every external tool
+fver init      create .fver/ in the current repository (rerun to refresh GUIDE.md)
+fver prove     index if needed, CBMC first, then prove: the repository, a file or a function
+fver status    what is proven, what is not, and why (a view on a terminal)
 fver config    get / set configuration values
-fver docs      print the command / config / workflow reference
+fver mcp       serve the session-mode protocol to Claude Code
+fver agent     the same protocol as plain commands (hidden)
 """
 
 from __future__ import annotations
@@ -31,19 +25,11 @@ app = typer.Typer(
 )
 
 _COMMAND_MODULES = [
-    "fver.commands.init",
     "fver.commands.setup",
-    "fver.commands.doctor",
+    "fver.commands.init",
     "fver.commands.prove",
-    "fver.commands.scan",
-    "fver.commands.hunt",
-    "fver.commands.verify",
     "fver.commands.status",
-    "fver.commands.show",
-    "fver.commands.report",
-    "fver.commands.clean",
     "fver.commands.config_cmd",
-    "fver.commands.docs",
     "fver.commands.agent_cmds",
     "fver.commands.mcp_cmd",
 ]

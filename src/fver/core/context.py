@@ -25,7 +25,7 @@ def resolve_target(ws: Workspace, cfg: FverConfig, redetect: bool = False) -> Ta
     if cached:
         detected = Target(**cached)
     else:
-        from fver.build.targets import detect_target
+        from fver.index.targets import detect_target
 
         detected = detect_target(cfg.target.compiler) or Target(compiler=cfg.target.compiler)
         ws.write_state("target", detected.__dict__)

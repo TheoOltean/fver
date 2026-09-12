@@ -13,9 +13,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from fver.agent import store
 from fver.core.context import AppContext
 from fver.core.models import Claim, Cost, FunctionInfo, PropertyClass, Status
+from fver.prove import store
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def reconcile(ctx: AppContext, run_id: str) -> list[StaleEntry]:
     """
     if ctx.backend is None:
         return []
-    from fver.agent.loop import Verifier
+    from fver.prove.loop import Verifier
 
     backend = ctx.backend.name
     tk = ctx.target.key

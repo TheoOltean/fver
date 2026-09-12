@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fver.commands.verify import order_with_dependencies
 from fver.core.config import FverConfig
 from fver.core.context import AppContext
 from fver.core.models import Claim, FunctionInfo, PropertyClass, Status
 from fver.core.workspace import Workspace
 from fver.ledger.memory import InMemoryLedger
+from fver.prove.select import order_with_dependencies
 
 
 def _fn(name, callees=(), score=0.0, tu="t1", static=False):

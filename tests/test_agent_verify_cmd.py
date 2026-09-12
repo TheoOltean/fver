@@ -1,7 +1,7 @@
-from fver.agent.client import FakeLLMClient
-from fver.agent.loop import Verifier
-from fver.commands.verify import _select
 from fver.core.models import Status
+from fver.prove.client import FakeLLMClient
+from fver.prove.loop import Verifier
+from fver.prove.select import _select
 from tests.test_agent_fakes import FakeBackend, make_ctx, make_repo, sub
 
 ACCEPT = sub("void zero(char *buf, size_t n) { /* FVER_ACCEPT */ }")

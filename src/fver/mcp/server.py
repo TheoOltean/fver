@@ -1,6 +1,6 @@
 """`fver mcp`: a stdio MCP server over the agent protocol.
 
-Each tool is a thin wrapper over fver.agent.protocol, so an MCP client and
+Each tool is a thin wrapper over fver.prove.protocol, so an MCP client and
 the CLI see exactly the same behaviour. The server is started inside a C
 repository (or with FVER_REPO pointing at one); every call opens the
 workspace fresh so the ledger is never stale.
@@ -13,8 +13,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fver.agent import protocol
 from fver.core.context import AppContext
+from fver.prove import protocol
 from fver.util.log import setup_logging
 
 RULES = (
@@ -105,15 +105,10 @@ def build_server() -> Any:
         """Ledger details for one function: status, claim history, assumptions, accepted submission, findings, callers."""
         return _run(protocol.show, ident=function, file=file, need_backend=False)
 
-    @server.tool(name="fver_scan")
-    def fver_scan(translate: bool = True) -> str:
+    @server.tool(name="fver_index")
+    def fver_index(translate: bool = True) -> str:
         """Capture the build, index every function, and (with translate) run the backend front-end to learn what it can represent. Slow on large repos (minutes)."""
         return _run(protocol.scan, translate=translate)
-
-    @server.tool(name="fver_hunt")
-    def fver_hunt(file: str | None = None) -> str:
-        """Run the bug finders (CBMC, and the sanitizers when hunters.test_command is set) over the indexed code, optionally one file. Concrete bugs become findings; slow on large repos."""
-        return _run(protocol.hunt, file=file, need_backend=False)
 
     return server
 

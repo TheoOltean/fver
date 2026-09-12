@@ -29,8 +29,8 @@ curl -fsSL https://raw.githubusercontent.com/TheoOltean/fver/main/get-fver.sh | 
 System packages go through your package manager (brew, apt-get, dnf or
 pacman, which may ask for sudo). A C compiler must already be present
 (`xcode-select --install` on macOS, `build-essential` on Debian/Ubuntu).
-There are no optional tools: `fver doctor` is either all green or tells you
-to run `fver setup`.
+There are no optional tools: `fver setup` ends with a table that is either
+all green or tells you what is missing.
 
 From a local checkout instead:
 
@@ -60,7 +60,7 @@ fver config set --user model.effort high                # low | medium | high | 
 ```
 
 Alternatively export `ANTHROPIC_API_KEY`, or run `ant auth login` once and
-the SDK will pick up the profile. `fver doctor` shows which source is used.
+the SDK will pick up the profile. `fver setup` shows which source is used.
 
 ## Use
 
@@ -83,8 +83,8 @@ terminal (CI, a pipe) it prints one line per function; `--plain` forces that.
 `--dry-run` lists what a run would touch and what it might cost.
 
 `fver status` opens the same view read-only. `fver status --plain` prints a
-table, `fver status -f NAME` details one function, `fver report` writes
-markdown and JSON under `.fver/reports/`.
+table, `fver status -f NAME` details one function, `fver status --markdown`
+and `--json` print the full report for CI or sharing.
 
 The config is `.fver/config.toml`: the model, its effort, and the budget per
 run and per function, each with a comment. `fver config set <key> <value>`
@@ -95,7 +95,7 @@ in the repository.
 
 ## Two ways to run the prover
 
-**API mode.** `fver verify` calls the Anthropic API itself: fully
+**API mode.** `fver prove` calls the Anthropic API itself: fully
 autonomous, parallel, budgeted per function and per run, results cached.
 Needs a key in your user-level config. Best for sweeping a whole codebase.
 
@@ -106,7 +106,7 @@ audit and the ledger. No API key; the cost is your Claude subscription;
 it is interactive and works while you edit code. Best for day-to-day
 development and for functions the autonomous loop could not close.
 
-Both modes record into the same ledger; `fver show <fn>` says which prover
+Both modes record into the same ledger; `fver status -f <fn>` says which prover
 produced a proof.
 
 ## Use from Claude Code
@@ -189,14 +189,13 @@ only what changed.
 
 ```sh
 fver init --backend null
-fver scan
 echo '["```c file=function.c\n/* FVER_ACCEPT */\nint f(void){return 0;}\n```"]' > .fver/fake.json
-FVER_FAKE_LLM=.fver/fake.json fver verify
+FVER_FAKE_LLM=.fver/fake.json fver prove --plain
 ```
 
 The `null` backend accepts any submission containing `FVER_ACCEPT`; the
-fake client replays scripted responses. This exercises scan, the loop, the
-ledger, caching and staleness tracking with no external dependencies.
+fake client replays scripted responses. This exercises indexing, the loop,
+the ledger, caching and staleness tracking with no external dependencies.
 
 ## What the checker cannot see
 
@@ -215,7 +214,7 @@ with `backend.refinedc.opaque_floats = false`.
 Also unsupported per function: variadic functions, `setjmp`/`longjmp`
 callers (the include itself is fine), copying a whole union value, and
 reading or writing union members of a union that is not annotated at its
-definition. `fver scan` reports every one of these per function.
+definition. `fver status` reports every one of these per function.
 
 ## Trust
 

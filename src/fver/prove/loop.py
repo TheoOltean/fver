@@ -17,10 +17,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fver.agent import invalidate, prompts, store
-from fver.agent.client import Completion, FatalAgentError, RetryableAgentError
-from fver.agent.parse import BugReport, ParseError, parse_submission
-from fver.agent.retrieval import pick_examples
 from fver.backends.base import (
     Backend,
     CheckOutcome,
@@ -31,8 +27,12 @@ from fver.backends.base import (
 from fver.core.context import AppContext
 from fver.core.models import Claim, Cost, Finding, FunctionInfo, PropertyClass, Status
 from fver.ledger.cache import cache_key as make_cache_key
+from fver.prove import invalidate, prompts, store
+from fver.prove.client import Completion, FatalAgentError, RetryableAgentError
+from fver.prove.parse import BugReport, ParseError, parse_submission
+from fver.prove.retrieval import pick_examples
 
-log = logging.getLogger("fver.agent.loop")
+log = logging.getLogger("fver.prove.loop")
 
 HISTORY_KEEP = 3  # exchanges kept verbatim; older ones are summarised
 
@@ -175,7 +175,7 @@ class Verifier:
         hash reflect the code on disk; update the ledger if anything moved."""
         from dataclasses import replace
 
-        from fver.extract.functions import extract_from_source
+        from fver.index.functions import extract_from_source
 
         try:
             fresh = [
@@ -214,7 +214,7 @@ class Verifier:
             backend=self.backend.name,
             tool_versions=self._tool_versions,
             target_key=self.target.key,
-            property_class=self.cfg.project.property_class,
+            property_class=PropertyClass.UB_FREE.value,
         )
 
     def _claim(
@@ -229,7 +229,7 @@ class Verifier:
     ) -> Claim:
         return Claim(
             function_id=task.function.id,
-            property_class=PropertyClass(self.cfg.project.property_class),
+            property_class=PropertyClass.UB_FREE,
             backend=self.backend.name,
             target_key=self.target.key,
             status=status,

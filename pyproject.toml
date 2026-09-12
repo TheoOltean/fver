@@ -27,11 +27,6 @@ dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
 [project.scripts]
 fver = "fver.cli:main"
 
-# Backends are discovered through this entry-point group. Third-party packages
-# can register their own backend here.
-[project.entry-points."fver.backends"]
-refinedc = "fver.backends.refinedc.backend:RefinedCBackend"
-null = "fver.backends.null:NullBackend"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fver"]

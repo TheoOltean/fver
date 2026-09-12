@@ -1,4 +1,4 @@
-"""fver hunt: run bug finders over the indexed code."""
+"""Run CBMC over a selection of functions before they are sent to the prover."""
 
 from __future__ import annotations
 
@@ -6,12 +6,11 @@ import logging
 from collections import defaultdict
 from dataclasses import asdict
 
-import typer
 from rich.table import Table
 
 from fver.core.models import Claim, Finding, FunctionInfo, PropertyClass, Status, TranslationUnit
-from fver.hunters.base import UB_KINDS, enabled_hunters
-from fver.util.log import console, setup_logging
+from fver.prove.cbmc import UB_KINDS, CbmcHunter
+from fver.util.log import console
 
 log = logging.getLogger(__name__)
 
@@ -75,11 +74,7 @@ def run_hunt(
         if not quiet:
             console.print("[yellow]No functions indexed.[/] Run `fver scan` first.")
         return []
-    hunters = enabled_hunters(ctx.config.hunters, only)
-    if not hunters:
-        if not quiet:
-            console.print("[yellow]No such hunter.[/] Choose from: cbmc, sanitizers.")
-        return []
+    hunters = [CbmcHunter()]
     by_id = {f.id: f for f in functions}
     run_id = ctx.ledger.start_run(
         "hunt", ctx.backend_name, ctx.target.key, {"hunters": [h.name for h in hunters]}
@@ -168,29 +163,3 @@ def render_findings(findings: list[Finding]) -> None:
         f"point (recorded as bug_found), {possible} possible under unconstrained inputs "
         f"(recorded, not counted as bugs), {len(findings) - real - possible} informational."
     )
-
-
-def register(app: typer.Typer) -> None:
-    @app.command("hunt", hidden=True)
-    def hunt(
-        only: list[str] = typer.Option(
-            None, "--only", help="Run only these hunters (cbmc, sanitizers)."
-        ),  # noqa: B008
-        function: str | None = typer.Option(
-            None, "--function", "-f", help="Restrict to one function name."
-        ),
-        file: str | None = typer.Option(
-            None, "--file", help="Restrict to one source file (repo-relative)."
-        ),
-        verbose: bool = typer.Option(False, "--verbose", "-v"),
-    ) -> None:
-        """Run the bug finders (CBMC; sanitizers when hunters.test_command is set) over the indexed code."""
-        from fver.core.context import AppContext
-
-        ctx = AppContext.load(need_backend=False)
-        setup_logging(ctx.ws.logs_dir, verbose, "hunt")
-        try:
-            findings = run_hunt(ctx, list(only) if only else None, function, file)
-            render_findings(findings)
-        finally:
-            ctx.close()

@@ -141,7 +141,7 @@ def callee_specs(
     A stored accepted submission is the contract callers were (or will be)
     checked against. It stays in force while the callee is stale: if the
     callee is later re-verified with a different contract, the callers are
-    invalidated then (see fver.agent.invalidate); if it is not re-verified,
+    invalidated then (see fver.prove.invalidate); if it is not re-verified,
     the caller's claim carries an explicit unverified-callee assumption.
     """
     out: dict[str, str] = {}

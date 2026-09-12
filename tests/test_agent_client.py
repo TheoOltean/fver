@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import anthropic
 import pytest
 
-from fver.agent.client import (
+from fver.prove.client import (
     FALLBACK_BETA,
     FatalAgentError,
     LLMClient,
@@ -162,7 +162,7 @@ def test_bad_request_is_fatal():
 
 
 def test_server_error_retried_then_raised(monkeypatch):
-    monkeypatch.setattr("fver.agent.client.time.sleep", lambda s: None)
+    monkeypatch.setattr("fver.prove.client.time.sleep", lambda s: None)
     c, fake = _client(
         LLMSettings(client_retries=2), response=_http_error(anthropic.InternalServerError, 500)
     )
@@ -172,7 +172,7 @@ def test_server_error_retried_then_raised(monkeypatch):
 
 
 def test_rate_limit_is_retryable(monkeypatch):
-    monkeypatch.setattr("fver.agent.client.time.sleep", lambda s: None)
+    monkeypatch.setattr("fver.prove.client.time.sleep", lambda s: None)
     c, _fake = _client(
         LLMSettings(client_retries=0), response=_http_error(anthropic.RateLimitError, 429)
     )

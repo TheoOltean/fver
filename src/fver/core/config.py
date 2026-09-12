@@ -30,7 +30,6 @@ class ProjectConfig(BaseModel):
     # Defaults to the repository directory's name.
     name: str | None = None
     backend: str = "refinedc"
-    property_class: str = "ub_free"
 
 
 class BuildConfig(BaseModel):
@@ -79,8 +78,6 @@ class ModelConfig(BaseModel):
     model: str = "claude-fable-5-1"
     effort: str = "high"  # low | medium | high | xhigh | max
     max_tokens: int = 32000
-    # Server-side refusal fallbacks (Claude API only). Disable on other platforms.
-    fallbacks: bool = True
     # Cache the stable prompt prefix (backend docs, examples).
     prompt_caching: bool = True
     timeout_seconds: float = 1800.0
@@ -91,35 +88,17 @@ class BudgetConfig(BaseModel):
     max_usd_per_function: float = 10.0
     max_usd_per_run: float = 200.0
     checker_timeout_seconds: int = 600
-    # How many functions `fver verify` works on concurrently.
+    # How many functions one `fver prove` may take on; 0 means no limit.
+    max_functions_per_run: int = 0
+    # How many functions are proven concurrently.
     parallelism: int = 2
 
 
-class VerifyConfig(BaseModel):
-    """Defaults for `fver verify`, `fver next` and `fver task`. Command-line
-    flags override these for one run."""
-
-    # Stop a run after this many functions; 0 means no limit.
-    limit: int = 0
-    # Also retry functions an earlier run left UNRESOLVED.
-    retry_unresolved: bool = False
-    # Place each function's unverified internal callees before it.
-    follow_callees: bool = True
-    # `fver next`: how many functions to list.
-    next_limit: int = 10
-    # `fver task`: include the annotation-language reference in plain output.
-    task_reference: bool = True
-
-
 class HuntersConfig(BaseModel):
-    """`fver hunt` always runs CBMC. The sanitizer hunter rebuilds and runs
-    the project's own tests, so it needs to know how: set test_command."""
+    """CBMC, which `fver prove` runs over each function before proving it."""
 
     cbmc_unwind: int = 8
     cbmc_timeout_seconds: int = 300
-    # Command that runs the project's tests, e.g. "make test". Unset: the
-    # sanitizer hunter has nothing to run.
-    test_command: str | None = None
 
 
 class FverConfig(BaseModel):
@@ -128,7 +107,6 @@ class FverConfig(BaseModel):
     target: TargetConfig = Field(default_factory=TargetConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
-    verify: VerifyConfig = Field(default_factory=VerifyConfig)
     hunters: HuntersConfig = Field(default_factory=HuntersConfig)
     # Free-form per-backend settings: config.backend["refinedc"]["refinedc_bin"]
     backend: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -234,10 +212,9 @@ SECTION_COMMENTS = {
         "# xhigh | max). API key: `fver config set --user model.api_key sk-ant-...` puts it in\n"
         "# ~/.fver/config.toml, outside the repository. Do not write it here."
     ),
-    "budget": "Money and attempt caps, per function and per run.",
-    "verify": "Defaults for `fver verify`, `fver next` and `fver task`; flags override for one run.",
-    "hunters": "Bug finders. CBMC always runs; set test_command to also run your tests under sanitizers.",
-    "backend": "Proof-checker settings: tool paths (`fver setup` records them in ~/.fver), extra includes.",
+    "budget": "Money, attempt and size caps, per function and per run.",
+    "hunters": "CBMC, run over each function before it is sent to the prover.",
+    "backend": "Proof-checker settings: tool paths (`fver setup` records them in ~/.fver), extra includes and defines.",
 }
 
 

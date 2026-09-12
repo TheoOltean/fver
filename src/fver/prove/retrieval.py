@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import re
 
-from fver.agent.store import load_accepted
 from fver.backends.base import Backend, FunctionTask, Submission
 from fver.core.models import FunctionInfo, Status
 from fver.core.workspace import Workspace
 from fver.ledger.api import Ledger
+from fver.prove.store import load_accepted
 
 _TOKEN_RE = re.compile(r"[a-z]+|\d+")
 

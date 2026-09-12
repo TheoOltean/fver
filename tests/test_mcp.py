@@ -15,8 +15,7 @@ EXPECTED = {
     "fver_check",
     "fver_changed",
     "fver_show",
-    "fver_scan",
-    "fver_hunt",
+    "fver_index",
 }
 
 
@@ -46,7 +45,6 @@ def test_tools_call_protocol_functions(monkeypatch):
         "changed",
         "show",
         "scan",
-        "hunt",
     ):
         monkeypatch.setattr(
             srv.protocol,

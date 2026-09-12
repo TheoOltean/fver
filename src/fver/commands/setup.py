@@ -180,7 +180,7 @@ def run_setup(jobs: int) -> None:
         _run(step)
     record_tool_paths()
     console.print(f"\n[green]Toolchain installed[/] in {_switch_bin().parent}.")
-    from fver.commands.doctor import collect_statuses, render
+    from fver.core.doctor import collect_statuses, render
 
     rows, _ = collect_statuses()
     code = render(rows)

@@ -15,11 +15,11 @@ from pathlib import Path
 
 import typer
 
-from fver.agent.client import FatalAgentError, LLMSettings
-from fver.agent.loop import FunctionOutcome, Verifier
-from fver.commands.verify import _make_llm, _print_plan, _print_summary, _select
 from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status
+from fver.prove.client import FatalAgentError, LLMSettings
+from fver.prove.loop import FunctionOutcome, Verifier
+from fver.prove.select import _make_llm, _print_plan, _print_summary, _select
 from fver.util.log import console, setup_logging
 
 
@@ -44,34 +44,32 @@ def split_targets(ctx: AppContext, targets: list[str]) -> tuple[list[str], list[
     return names, files
 
 
-def select_functions(
-    ctx: AppContext, targets: list[str], limit: int | None, retry_unresolved: bool
-) -> list[FunctionInfo]:
-    """Union of the selections for every target, callees first, then limited."""
-    from fver.commands.verify import order_with_dependencies
+def select_functions(ctx: AppContext, targets: list[str], limit: int | None) -> list[FunctionInfo]:
+    """Union of the selections for every target, callees first, then limited.
+    Naming a function explicitly also retries one left unresolved."""
+    from fver.prove.select import order_with_dependencies
 
     names, files = split_targets(ctx, targets)
-    deps = ctx.config.verify.follow_callees
+    retry = bool(names)
     if not files:
-        return _select(ctx, names, None, limit, retry_unresolved, False, with_deps=deps)
+        return _select(ctx, names, None, limit, retry, False, with_deps=True)
     seen: set[str] = set()
     out: list[FunctionInfo] = []
     for pat in files:
-        for fn in _select(ctx, names, pat, None, retry_unresolved, False, with_deps=False):
+        for fn in _select(ctx, names, pat, None, retry, False, with_deps=False):
             if fn.id not in seen:
                 seen.add(fn.id)
                 out.append(fn)
     out.sort(key=lambda f: (-f.attack_score, f.source_path, f.name))
-    if deps:
-        out = order_with_dependencies(ctx, out)
+    out = order_with_dependencies(ctx, out)
     return out[:limit] if limit else out
 
 
 def refresh_index(ctx: AppContext) -> bool:
     """Run a scan when there is no index yet or sources changed since the last
     one. Returns True if a scan ran."""
-    from fver.agent.protocol import _modified_files
-    from fver.commands.scan import run_scan
+    from fver.index.scan import run_scan
+    from fver.prove.protocol import _modified_files
 
     if ctx.ws.state_path("index").exists() and not _modified_files(ctx):
         return False
@@ -85,12 +83,11 @@ def hunt_first(
 ) -> list[FunctionInfo]:
     """CBMC over the selection (plus the sanitizers over the project's tests
     for a whole-repository run). Functions with a confirmed bug drop out."""
-    from fver.commands.hunt import run_hunt
+    from fver.prove.hunt import run_hunt
 
     if not selected:
         return selected
-    only = None if whole_repo else ["cbmc"]
-    findings = run_hunt(ctx, only, None, None, selected=selected, quiet=True)
+    findings = run_hunt(ctx, None, None, None, selected=selected, quiet=True)
     bugs = {f.function_id for f in findings if f.function_id and f.confidence == "high"}
     kept = []
     for fn in selected:
@@ -118,8 +115,8 @@ def run_prove(
     cfg = ctx.config
     assert ctx.backend is not None
     refresh_index(ctx)
-    limit = limit if limit is not None else (cfg.verify.limit or None)
-    selected = select_functions(ctx, targets, limit, cfg.verify.retry_unresolved)
+    limit = limit if limit is not None else (cfg.budget.max_functions_per_run or None)
+    selected = select_functions(ctx, targets, limit)
     if not selected:
         console.print(
             "[yellow]Nothing to prove:[/] no matching functions are waiting. "
@@ -132,7 +129,6 @@ def run_prove(
         model=cfg.model.model,
         effort=cfg.model.effort,
         max_tokens=cfg.model.max_tokens,
-        fallbacks=cfg.model.fallbacks,
         prompt_caching=cfg.model.prompt_caching,
         timeout_seconds=cfg.model.timeout_seconds,
     )
@@ -215,7 +211,10 @@ def register(app: typer.Typer) -> None:
             None, "--max-usd", help="Budget for this run (config: budget.max_usd_per_run)."
         ),
         limit: int | None = typer.Option(
-            None, "--limit", "-n", help="Stop after this many functions (config: verify.limit)."
+            None,
+            "--limit",
+            "-n",
+            help="Stop after this many functions (config: budget.max_functions_per_run).",
         ),
         jobs: int | None = typer.Option(
             None, "--jobs", "-j", help="Functions proven concurrently (config: budget.parallelism)."

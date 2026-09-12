@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from fver.agent.client import FakeLLMClient
-from fver.agent.loop import Verifier
 from fver.backends.null import NullBackend
 from fver.core.config import FverConfig
 from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status, TranslationUnit
 from fver.core.workspace import Workspace
 from fver.ledger.memory import InMemoryLedger
+from fver.prove.client import FakeLLMClient
+from fver.prove.loop import Verifier
 
 ACCEPT = "```c file=function.c\n/* FVER_ACCEPT */\nint f(void) { return 0; }\n```\n"
 
@@ -84,7 +84,7 @@ def test_body_change_makes_proof_stale_and_reverify_clears_it(tmp_path: Path) ->
     assert _statuses(ctx)["callee"] == "stale"
     assert _statuses(ctx)["caller"] == "verified"
 
-    from fver.agent.invalidate import reconcile
+    from fver.prove.invalidate import reconcile
 
     stale = reconcile(ctx, "run2")
     assert [s.function.name for s in stale] == ["callee"]
@@ -123,7 +123,7 @@ def test_reconcile_detects_cache_key_drift(tmp_path: Path) -> None:
     # Simulate a tool version change by editing the stored cache key's inputs:
     # a new external spec file for a callee changes the key.
     (ctx.ws.external_dir / "callee.spec").write_text("[[trusted]] int callee(int);")
-    from fver.agent.invalidate import reconcile
+    from fver.prove.invalidate import reconcile
 
     stale = reconcile(ctx, "run2")
     assert [s.function.name for s in stale] == ["caller"]

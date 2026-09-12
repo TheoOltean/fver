@@ -7,8 +7,8 @@ from __future__ import annotations
 import re
 
 from fver.core.models import FunctionInfo
-from fver.extract.callgraph import CallGraph
-from fver.extract.functions import get_function_text
+from fver.index.callgraph import CallGraph
+from fver.index.functions import get_function_text
 
 _NAME_TOKENS = {
     "parse": 0.25,

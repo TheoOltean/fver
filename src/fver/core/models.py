@@ -114,9 +114,6 @@ class PropertyClass(str, Enum):
     the ledger schema does not change when more are added."""
 
     UB_FREE = "ub_free"
-    TERMINATION = "termination"
-    FUNCTIONAL = "functional"
-    HYPERPROPERTY = "hyperproperty"
 
 
 @dataclass

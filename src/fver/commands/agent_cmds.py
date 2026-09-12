@@ -13,8 +13,8 @@ from pathlib import Path
 
 import typer
 
-from fver.agent import protocol
 from fver.core.context import AppContext
+from fver.prove import protocol
 from fver.util.log import console, err_console, setup_logging
 
 
@@ -53,13 +53,13 @@ def _register(app: typer.Typer) -> None:
         reference: bool | None = typer.Option(
             None,
             "--reference/--no-reference",
-            help="Include the language reference in plain output (config: verify.task_reference).",
+            help="Include the language reference in plain output (default: yes).",
         ),
     ) -> None:
         """Print the proving packet for one function: reference, code, context, contracts, prompt."""
         ctx = _ctx(True, "task")
         if reference is None:
-            reference = ctx.config.verify.task_reference
+            reference = True
         try:
             d = protocol.task(ctx, function, file)
             if as_json:
@@ -120,16 +120,14 @@ def _register(app: typer.Typer) -> None:
 
     @app.command("next")
     def next_(
-        limit: int | None = typer.Option(
-            None, "--limit", "-n", help="How many (config: verify.next_limit)."
-        ),
+        limit: int | None = typer.Option(None, "--limit", "-n", help="How many (default 10)."),
         file: str | None = typer.Option(None, "--file", help="Only this source file (glob)."),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """The next functions to prove, callees before callers, highest attack surface first."""
         ctx = _ctx(True, "next")
         if limit is None:
-            limit = ctx.config.verify.next_limit
+            limit = 10
         try:
             d = protocol.next_functions(ctx, limit, file)
         finally:

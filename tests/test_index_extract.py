@@ -1,13 +1,13 @@
-"""Tests for fver.extract: functions, callgraph, attack surface."""
+"""Tests for fver.index: functions, callgraph, attack surface."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from fver.core.models import TranslationUnit
-from fver.extract.attack_surface import score
-from fver.extract.callgraph import build_callgraph
-from fver.extract.functions import extract_from_source, extract_from_tu, get_function_text
+from fver.index.attack_surface import score
+from fver.index.callgraph import build_callgraph
+from fver.index.functions import extract_from_source, extract_from_tu, get_function_text
 
 FIXTURE = Path(__file__).parent / "fixtures" / "miniproj"
 

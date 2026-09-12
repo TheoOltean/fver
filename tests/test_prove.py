@@ -13,7 +13,7 @@ from fver.cli import app
 from fver.commands import prove
 from fver.core.context import AppContext
 from fver.core.models import Finding
-from fver.hunters import base as hunters_base
+from fver.prove import hunt as hunt_mod
 
 ACCEPT = "```c file=function.c\n/* FVER_ACCEPT */\n{body}\n```"
 SRC = "int add(int a, int b) { return a + b; }\nint twice(int x) { return add(x, x); }\n"
@@ -60,12 +60,12 @@ class QuietHunter:
 @pytest.fixture
 def fake_cbmc(monkeypatch):
     QuietHunter.calls.clear()
-    monkeypatch.setattr(hunters_base, "builtin_hunters", lambda: {"cbmc": QuietHunter})
+    monkeypatch.setattr(hunt_mod, "CbmcHunter", QuietHunter)
     return QuietHunter
 
 
 def test_split_and_select_targets(repo: Path) -> None:
-    CliRunner().invoke(app, ["scan", "--no-translate", "--no-preprocess"])
+    CliRunner().invoke(app, ["prove", "--dry-run"])
     ctx = AppContext.load(repo, need_backend=True)
     try:
         assert prove.split_targets(ctx, []) == ([], [])
@@ -74,14 +74,14 @@ def test_split_and_select_targets(repo: Path) -> None:
             ["src/m.c", "other.c"],
         )
         assert prove.split_targets(ctx, [str(repo / "src" / "m.c")]) == ([], ["src/m.c"])
-        everything = [f.name for f in prove.select_functions(ctx, [], None, False)]
+        everything = [f.name for f in prove.select_functions(ctx, [], None)]
         assert everything == ["add", "twice"]  # callee before caller
-        assert [f.name for f in prove.select_functions(ctx, ["twice"], None, False)] == [
+        assert [f.name for f in prove.select_functions(ctx, ["twice"], None)] == [
             "add",
             "twice",
         ]
-        assert [f.name for f in prove.select_functions(ctx, ["src/m.c"], 1, False)] == ["add"]
-        assert prove.select_functions(ctx, ["nothing.c"], None, False) == []
+        assert [f.name for f in prove.select_functions(ctx, ["src/m.c"], 1)] == ["add"]
+        assert prove.select_functions(ctx, ["nothing.c"], None) == []
     finally:
         ctx.close()
 

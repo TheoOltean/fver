@@ -1,4 +1,4 @@
-"""`fver verify`: run the LLM proof loop over unverified functions."""
+"""Choosing and ordering the functions a run works on, plus the run plan."""
 
 from __future__ import annotations
 
@@ -8,15 +8,14 @@ import os
 from pathlib import Path
 from typing import Any
 
-import typer
 from rich.table import Table
 
-from fver.agent.client import FatalAgentError, LLMClient, LLMSettings
-from fver.agent.loop import FunctionOutcome, Verifier
-from fver.agent.pricing import estimate_attempt_usd
 from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status
-from fver.util.log import console, setup_logging
+from fver.prove.client import LLMClient, LLMSettings
+from fver.prove.loop import Verifier
+from fver.prove.pricing import estimate_attempt_usd
+from fver.util.log import console
 
 
 def _select(
@@ -112,146 +111,6 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
     return ordered
 
 
-def register(app: typer.Typer) -> None:
-    @app.command("verify", hidden=True)
-    def verify(
-        function: list[str] = typer.Option(
-            None, "--function", "-f", help="Function name (glob); repeatable."
-        ),  # noqa: B008
-        file: str | None = typer.Option(
-            None, "--file", help="Only functions in this source file (glob)."
-        ),
-        limit: int | None = typer.Option(
-            None, "--limit", "-n", help="Stop after this many functions (config: verify.limit)."
-        ),
-        max_usd: float | None = typer.Option(
-            None, "--max-usd", help="Run budget in USD (config: budget.max_usd_per_run)."
-        ),
-        retry_unresolved: bool | None = typer.Option(
-            None,
-            "--retry-unresolved/--no-retry-unresolved",
-            help="Also retry UNRESOLVED functions (config: verify.retry_unresolved).",
-        ),
-        recheck: bool = typer.Option(
-            False, "--recheck", help="Re-run the checker on VERIFIED functions, no LLM."
-        ),
-        deps: bool | None = typer.Option(
-            None,
-            "--deps/--no-deps",
-            help="Pull a function's unverified callees in front of it "
-            "(config: verify.follow_callees).",
-        ),
-        dry_run: bool = typer.Option(
-            False, "--dry-run", help="Show the plan and cost estimate; do nothing."
-        ),
-        parallel: int | None = typer.Option(
-            None,
-            "--parallel",
-            "-j",
-            help="Functions verified concurrently (config: budget.parallelism).",
-        ),
-        model: str | None = typer.Option(None, "--model", help="Model id (config: model.model)."),
-        effort: str | None = typer.Option(
-            None, "--effort", help="low | medium | high | xhigh | max (config: model.effort)"
-        ),
-        verbose: bool = typer.Option(False, "--verbose", "-v"),
-    ) -> None:
-        """Run the LLM proof loop over functions that are not yet verified."""
-        ctx = AppContext.load(need_backend=True)
-        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name="verify")
-        cfg = ctx.config
-        assert ctx.backend is not None
-
-        if limit is None:
-            limit = cfg.verify.limit or None
-        if retry_unresolved is None:
-            retry_unresolved = cfg.verify.retry_unresolved
-        if deps is None:
-            deps = cfg.verify.follow_callees
-        selected = _select(
-            ctx, function or [], file, limit, retry_unresolved, recheck, with_deps=deps
-        )
-        if not selected:
-            console.print(
-                "[yellow]Nothing to do:[/] no matching functions in the selected statuses. "
-                "Run `fver scan` first, or use --retry-unresolved."
-            )
-            ctx.close()
-            raise typer.Exit(0)
-
-        settings = LLMSettings(
-            api_key=cfg.model.api_key,
-            base_url=cfg.model.base_url,
-            model=model or cfg.model.model,
-            effort=effort or cfg.model.effort,
-            max_tokens=cfg.model.max_tokens,
-            fallbacks=cfg.model.fallbacks,
-            prompt_caching=cfg.model.prompt_caching,
-            timeout_seconds=cfg.model.timeout_seconds,
-        )
-        budget_run = max_usd if max_usd is not None else cfg.budget.max_usd_per_run
-        parallelism = parallel if parallel is not None else cfg.budget.parallelism
-
-        if dry_run:
-            _print_plan(ctx, selected, settings, budget_run, recheck)
-            ctx.close()
-            raise typer.Exit(0)
-
-        run_id = ctx.ledger.start_run(
-            "verify",
-            ctx.backend.name,
-            ctx.target.key,
-            {
-                "model": settings.model,
-                "effort": settings.effort,
-                "functions": len(selected),
-                "recheck": recheck,
-                "max_usd": budget_run,
-            },
-        )
-        llm = _make_llm(settings, ctx.ws.logs_dir, run_id)
-        verifier = Verifier(ctx, llm, run_id)
-        console.print(
-            f"Verifying {len(selected)} function(s) with {settings.model} (effort {settings.effort}), "
-            f"backend {ctx.backend.name}, run budget ${budget_run:.2f}, parallel {parallelism}."
-        )
-
-        counts = {s: 0 for s in Status}
-        cache_hits = 0
-
-        def on_done(fn: FunctionInfo, out: FunctionOutcome) -> None:
-            nonlocal cache_hits
-            counts[out.claim.status] = counts.get(out.claim.status, 0) + 1
-            if out.cache_hit:
-                cache_hits += 1
-            colour = {Status.VERIFIED: "green", Status.BUG_FOUND: "red"}.get(
-                out.claim.status, "yellow"
-            )
-            tag = (
-                " (cache)"
-                if out.cache_hit
-                else f" ({out.attempts} attempt(s), ${out.claim.cost.usd:.2f})"
-            )
-            console.print(
-                f"[{colour}]{out.claim.status.value:12}[/] {fn.name}  {fn.source_path}{tag}"
-            )
-
-        exit_code = 0
-        try:
-            verifier.run(
-                selected, budget_run, parallelism=parallelism, recheck=recheck, on_done=on_done
-            )
-            ctx.ledger.end_run(run_id, True)
-        except FatalAgentError as e:
-            console.print(f"[red]Fatal:[/] {e}")
-            ctx.ledger.end_run(run_id, False, str(e))
-            exit_code = 2
-        finally:
-            _print_summary(counts, cache_hits, verifier.run_cost.usd)
-            ctx.close()
-        raise typer.Exit(exit_code)
-
-
 def _print_plan(
     ctx: AppContext,
     selected: list[FunctionInfo],
@@ -259,8 +118,7 @@ def _print_plan(
     budget_run: float,
     recheck: bool,
 ) -> None:
-    from fver.agent import store
-    from fver.agent.loop import Verifier
+    from fver.prove import store
 
     class _NoLLM:
         def complete(self, *a, **k):  # pragma: no cover
@@ -316,7 +174,7 @@ def _make_llm(settings: LLMSettings, log_dir: Path, run_id: str) -> Any:
     scripted = os.environ.get("FVER_FAKE_LLM")
     if not scripted:
         return LLMClient(settings, log_dir=log_dir, run_id=run_id)
-    from fver.agent.client import FakeLLMClient
+    from fver.prove.client import FakeLLMClient
 
     responses = json.loads(Path(scripted).read_text(encoding="utf-8", errors="replace"))
     console.print("[yellow]FVER_FAKE_LLM set: using scripted responses, no API calls.[/]")
