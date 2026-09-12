@@ -177,9 +177,16 @@ def test_unsupported_propagates_to_callers_and_missing_contract_is_detected(
     (repo / "src" / "u.c").write_text(
         "int unsupported_leaf(void) { return 1; }\nint caller(void) { return unsupported_leaf(); }\n"
     )
-    r = CliRunner().invoke(app, ["status", "src/u.c"])
-    assert r.exit_code == 0, r.output
-    assert "calls unsupported_leaf, which is unsupported" in r.output.replace("\n", " ")
+    assert CliRunner().invoke(app, ["status"]).exit_code == 0
+    ctx = AppContext.load(repo, need_backend=False)
+    try:
+        rows = {r.function.name: r for r in ctx.ledger.list_functions("null", ctx.target.key)}
+    finally:
+        ctx.close()
+    assert rows["unsupported_leaf"].status.value == "unsupported"
+    caller = rows["caller"]
+    assert caller.status.value == "unsupported"
+    assert caller.claim is not None and "calls unsupported_leaf" in caller.claim.message
     from fver.prove.loop import MISSING_CONTRACT
 
     assert MISSING_CONTRACT.findall(
