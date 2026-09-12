@@ -1,5 +1,8 @@
-"""Work out how a repository builds, so `fver scan` can capture exact
-compiler flags without the user configuring anything."""
+"""How fver reads a repository. By default: the source itself, with every
+header directory in the tree on the include path and no macros defined. A
+build is consulted only when the user points at one (an exported
+compile_commands.json, or a capture command) because the project generates
+headers or depends on build-time defines."""
 
 from __future__ import annotations
 
@@ -9,35 +12,16 @@ from fver.core.config import BuildConfig
 
 
 def detect_build(repo_root: Path) -> tuple[BuildConfig, list[str]]:
-    """Build settings inferred from files in the repo, plus notes for the user.
-    Used at scan time whenever [build] in config.toml names neither a
-    compile_commands.json nor a capture command."""
-    notes: list[str] = []
+    """Use an exported compile_commands.json if one is lying around; otherwise
+    read the source directly. Returns (config, notes for the user)."""
     build = BuildConfig()
     for cand in ("compile_commands.json", "build/compile_commands.json"):
         if (repo_root / cand).exists():
             build.compile_commands = cand
-            notes.append(f"build: using {cand}")
-            return build, notes
-    if (repo_root / "CMakeLists.txt").exists():
-        build.compile_commands = "build/compile_commands.json"
-        notes.append(
-            "build: CMake project; run `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build` "
-            "once so build/compile_commands.json exists before `fver scan`"
-        )
-    elif (repo_root / "meson.build").exists():
-        build.compile_commands = "build/compile_commands.json"
-        notes.append("build: Meson project; run `meson setup build` once before `fver scan`")
-    elif any((repo_root / m).exists() for m in ("Makefile", "makefile", "GNUmakefile")):
-        # -B rebuilds every target whatever the timestamps say, so bear sees
-        # every compiler command even when the project is already built.
-        build.capture_command = "bear -- make -B"
-        notes.append("build: Makefile project; the first `fver prove` records a full rebuild")
-    else:
-        notes.append(
-            "build: no build system found; every .c file is compiled with build.fallback_flags"
-        )
-    return build, notes
+            return build, [f"build: using the exported {cand} for exact compiler flags"]
+    return build, [
+        "source: read directly, with the repository's header directories on the include path"
+    ]
 
 
 def resolve_build(repo_root: Path, configured: BuildConfig) -> tuple[BuildConfig, list[str]]:
@@ -46,10 +30,5 @@ def resolve_build(repo_root: Path, configured: BuildConfig) -> tuple[BuildConfig
     if configured.compile_commands or configured.capture_command:
         return configured, []
     detected, notes = detect_build(repo_root)
-    merged = configured.model_copy(
-        update={
-            "compile_commands": detected.compile_commands,
-            "capture_command": detected.capture_command,
-        }
-    )
+    merged = configured.model_copy(update={"compile_commands": detected.compile_commands})
     return merged, notes

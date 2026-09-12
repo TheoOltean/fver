@@ -2,7 +2,6 @@
 
 - a C compiler (checked, not installed: it comes with the platform's
   developer tooling)
-- bear, to capture Makefile builds as compile_commands.json
 - cbmc, the bounded model checker used by `fver hunt`
 - an opam switch named `fver` holding Rocq, Iris, Cerberus and RefinedC,
   pinned to the commits fver is calibrated against
@@ -44,14 +43,13 @@ REFINEDC_PIN = (
 # Packages per package manager. Every manager listed here can install all
 # of them; anything else gets a message with the URLs.
 PACKAGES: dict[str, list[str]] = {
-    "brew": ["opam", "bear", "cbmc", "gmp", "pkg-config"],
-    "apt-get": ["opam", "bear", "cbmc", "build-essential", "m4", "libgmp-dev", "pkg-config"],
-    "dnf": ["opam", "bear", "cbmc", "gcc", "make", "m4", "gmp-devel", "pkgconf-pkg-config"],
-    "pacman": ["opam", "bear", "cbmc", "base-devel", "gmp"],
+    "brew": ["opam", "cbmc", "gmp", "pkg-config"],
+    "apt-get": ["opam", "cbmc", "build-essential", "m4", "libgmp-dev", "pkg-config"],
+    "dnf": ["opam", "cbmc", "gcc", "make", "m4", "gmp-devel", "pkgconf-pkg-config"],
+    "pacman": ["opam", "cbmc", "base-devel", "gmp"],
 }
 URLS = {
     "opam": "https://opam.ocaml.org/doc/Install.html",
-    "bear": "https://github.com/rizsotto/Bear",
     "cbmc": "https://github.com/diffblue/cbmc/releases",
 }
 
@@ -195,5 +193,5 @@ def register(app: typer.Typer) -> None:
             max(2, (os.cpu_count() or 4) - 1), "--jobs", "-j", help="Parallel opam build jobs."
         ),
     ) -> None:
-        """Install every tool fver needs: bear, cbmc, and an opam switch with Rocq, Iris, Cerberus and RefinedC. Idempotent; rerun to resume."""
+        """Install every tool fver needs: cbmc, and an opam switch with Rocq, Iris, Cerberus and RefinedC. Idempotent; rerun to resume."""
         run_setup(jobs)

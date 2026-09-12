@@ -48,22 +48,58 @@ _LONG_DOUBLE = re.compile(r"\blong[ \t]+double\b")
 _DOUBLE = re.compile(r"\bdouble\b")
 _FLOAT = re.compile(r"\bfloat\b")
 _MENTIONS = re.compile(r"\b(?:float|double)\b")
+_INCLUDE_LINE = re.compile(r"^[ \t]*#[ \t]*include\b.*$", re.MULTILINE)
+# `(void)expr` discards a value; the front-end does not implement the cast, so
+# it is dropped. A `(void)` preceded by an identifier or `)` is a parameter
+# list (`int f(void)`, `void (*fp)(void)`) and is left alone; after a keyword
+# such as `return` it is a cast.
+_VOID_CAST = re.compile(r"\(\s*void\s*\)")
+_KEYWORDS_BEFORE_CAST = ("return", "case", "else", "do")
+
+
+def _drop_void_casts(code: str) -> str:
+    out: list[str] = []
+    pos = 0
+    for m in _VOID_CAST.finditer(code):
+        before = code[: m.start()].rstrip()
+        prev = before[-1] if before else ""
+        word = re.search(r"([A-Za-z_][A-Za-z0-9_]*)$", before)
+        is_param_list = (prev.isalnum() or prev in "_)") and not (
+            word and word.group(1) in _KEYWORDS_BEFORE_CAST
+        )
+        after = code[m.end() :].lstrip()
+        if is_param_list or after.startswith("*"):
+            continue
+        out.append(code[pos : m.start()])
+        pos = m.end()
+    out.append(code[pos:])
+    return "".join(out)
 
 
 def _rewrite_code(code: str) -> str:
     code = _LONG_DOUBLE.sub(f"struct {FLD}", code)
     code = _DOUBLE.sub(f"struct {F64}", code)
     code = _FLOAT.sub(f"struct {F32}", code)
-    return code
+    return _drop_void_casts(code)
 
 
 def rewrite_floats(text: str) -> str:
-    """Replace floating-point type specifiers outside comments and literals.
-    Line-preserving: no newline is added or removed."""
+    """Replace floating-point type specifiers (and drop `(void)` casts) outside
+    comments, literals and #include lines. Line-preserving: no newline is
+    added or removed."""
     out: list[str] = []
     for m in _SEGMENT.finditer(text):
         seg = m.group(0)
-        out.append(seg if m.group("lit") is not None else _rewrite_code(seg))
+        if m.group("lit") is not None:
+            out.append(seg)
+            continue
+        # #include lines name files (<float.h>): leave them exactly as they are.
+        pos = 0
+        for inc in _INCLUDE_LINE.finditer(seg):
+            out.append(_rewrite_code(seg[pos : inc.start()]))
+            out.append(inc.group(0))
+            pos = inc.end()
+        out.append(_rewrite_code(seg[pos:]))
     return "".join(out)
 
 

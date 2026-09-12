@@ -94,7 +94,6 @@ def collect_statuses(online: bool = False) -> tuple[list[ToolStatus], str | None
             ),
         )
     )
-    rows.append(_tool("bear", True, "run `fver setup`"))
     try:
         from fver.prove.cbmc import CbmcHunter
 

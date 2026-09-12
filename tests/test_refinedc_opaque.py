@@ -33,6 +33,32 @@ def test_rewrite_replaces_type_specifiers_only():
     assert out.count("\n") == HEADER.count("\n")  # line-preserving
 
 
+def test_rewrite_leaves_include_lines_alone():
+    src = '#include <float.h>\n# include "double.h"\ndouble d;\n'
+    assert (
+        opaque.rewrite_floats(src)
+        == '#include <float.h>\n# include "double.h"\nstruct fver_f64 d;\n'
+    )
+
+
+def test_rewrite_drops_void_casts_but_not_parameter_lists():
+    src = (
+        "#define lua_assert(c) ((void)0)\n"
+        "int f(void);\n"
+        "void (*fp)(void);\n"
+        "static void g (void) { (void)f(); (void) fp; return (void)0; }\n"
+        "void *p = (void *)0;\n"
+        "int h(int x) { x = (void)x, 1; return x; }\n"
+    )
+    out = opaque.rewrite_floats(src)
+    assert "#define lua_assert(c) (0)" in out
+    assert "int f(void);" in out and "void (*fp)(void);" in out
+    assert "static void g (void) { f();  fp; return 0; }" in out
+    assert "void *p = (void *)0;" in out
+    assert "x = x, 1;" in out.replace("  ", " ")
+    assert out.count("\n") == src.count("\n")
+
+
 def test_rewrite_is_idempotent_and_skips_block_comments():
     src = "/* double\n   float */ double d; // float\n"
     once = opaque.rewrite_floats(src)
@@ -117,6 +143,7 @@ def test_cpp_flags_put_shadow_dirs_before_project_dirs(tmp_path: Path):
     assert flags.index(f"-I{shadow / 'include'}") < flags.index(real_inc)
     assert flags.index(f"-I{shadow / 'include'}") < flags.index(real_src)  # all shadows first
     assert "-I/usr/local/include" in flags and not any("shadow/usr" in f for f in flags)
+    assert (shadow / "src").is_dir() and (shadow / "include").is_dir()  # -I dirs exist
 
 
 def test_check_argv_force_includes_setjmp_shim_and_opaque_header(tmp_path: Path):

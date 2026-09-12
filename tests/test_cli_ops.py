@@ -67,7 +67,7 @@ def test_init_creates_layout_and_detects_makefile(repo):
     text = (ws.root / "config.toml").read_text()
     assert text.startswith("# fver project configuration") and "[build]" not in text
     assert 'backend = "refinedc"' not in text and "# api_key: paste your Anthropic key" in text
-    assert "Makefile project" in r.output
+    assert "source: read directly" in r.output
     # user tree untouched apart from .fver
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]
 
@@ -90,8 +90,8 @@ def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch)
     from fver.index.detect import detect_build, resolve_build
 
     r = runner.invoke(app, ["init"])
-    assert r.exit_code == 0 and "CMake project" in r.output
-    assert detect_build(d)[0].compile_commands == "build/compile_commands.json"
+    assert r.exit_code == 0 and "source: read directly" in r.output
+    assert detect_build(d)[0].compile_commands is None
     (d / "compile_commands.json").write_text("[]")
     assert detect_build(d)[0].compile_commands == "compile_commands.json"
     # A configured source of flags wins over detection; include/exclude survive a detection.
@@ -340,3 +340,16 @@ def test_hunt_filters_by_function_and_file(repo):
     assert [f.name for f in functions] == ["g"] and [t.id for t in tus] == ["tu1"]
     tus, functions = hunt._load_index(ctx, None, "src/none.c")
     assert functions == [] and tus == []
+
+
+def test_log_records_from_child_loggers_carry_the_command_tag(tmp_path):
+    import logging
+
+    from fver.util.log import LOG_FILE, setup_logging
+
+    setup_logging(tmp_path, run_name="prove", console=False)
+    logging.getLogger("fver.some.child").info("hello from a child")
+    for h in logging.getLogger("fver").handlers:
+        h.flush()
+    text = (tmp_path / LOG_FILE).read_text()
+    assert "[prove] fver.some.child: hello from a child" in text

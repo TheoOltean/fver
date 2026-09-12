@@ -43,13 +43,18 @@ def setup_logging(
     protocol output reaches the terminal."""
     root = logging.getLogger("fver")
     root.setLevel(logging.DEBUG)
-    for f in list(root.filters):
-        if isinstance(f, _RunContext):
-            root.removeFilter(f)
-    root.addFilter(_RunContext(run_name))
+    # Logger filters only see records logged to that logger itself, not to
+    # children, so the command tag goes on the handlers.
+    tag = _RunContext(run_name)
+    for h in root.handlers:
+        for f in list(h.filters):
+            if isinstance(f, _RunContext):
+                h.removeFilter(f)
+        h.addFilter(tag)
     if console and not any(isinstance(h, RichHandler) for h in root.handlers):
         h = RichHandler(console=err_console, show_path=False, rich_tracebacks=True, markup=True)
         h.setLevel(logging.DEBUG if verbose else logging.INFO)
+        h.addFilter(tag)
         root.addHandler(h)
     if log_dir is not None:
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -66,5 +71,6 @@ def setup_logging(
             fh.setFormatter(
                 logging.Formatter("%(asctime)s %(levelname)s [%(run)s] %(name)s: %(message)s")
             )
+            fh.addFilter(tag)
             root.addHandler(fh)
     return root

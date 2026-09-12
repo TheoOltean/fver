@@ -298,6 +298,7 @@ class RefinedCBackend:
             for pdir in project_dirs:
                 sd = opaque.shadow_dir_for(pdir, Path(repo_root), self._shadow_root)
                 if sd is not None:
+                    sd.mkdir(parents=True, exist_ok=True)  # cpp rejects a missing -I
                     shadows.append(facts.INCLUDE_FLAG_FMT.format(dir=str(sd)))
             flags = shadows + flags
         for shim in self._shim_dirs():

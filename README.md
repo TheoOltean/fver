@@ -17,7 +17,7 @@ fver never edits your source files. Everything it produces lives in
 
 One line, no sudo for fver itself, on Linux or macOS. It installs `uv` if
 missing, puts `fver` in `~/.local/bin`, then runs `fver setup`, which
-installs everything else fver needs: `bear`, `cbmc`, and an opam switch
+installs everything else fver needs: `cbmc`, and an opam switch
 holding Rocq, Iris, Cerberus and RefinedC, pinned to the commits fver is
 tested against. The first run builds the proof toolchain and takes 20 to 40
 minutes; rerunning resumes where it stopped.

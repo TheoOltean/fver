@@ -44,6 +44,13 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
         pp_errors: dict[str, str] = {}
         if preprocess:
             pp_errors = preprocess_all(ws, tus, timeout=cfg.budget.checker_timeout_seconds)
+            if pp_errors and not quiet:
+                console.print(
+                    f"[yellow]{len(pp_errors)} file(s) could not be read[/] (a header or macro "
+                    "the build would supply is missing). If the project generates headers or "
+                    "needs build-time defines, export its compile_commands.json and set "
+                    "build.compile_commands, or set build.capture_command."
+                )
 
         # 3. target
         detected = detect_target(cfg.target.compiler)
@@ -156,7 +163,7 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
 def _print_summary(tus, pp_errors, functions, unsupported, translated: bool) -> None:
     t = Table(title="fver scan", show_header=False)
     t.add_row("translation units", str(len(tus)))
-    t.add_row("preprocessed", f"{len(tus) - len(pp_errors)} ok, {len(pp_errors)} failed")
+    t.add_row("read", f"{len(tus) - len(pp_errors)} ok, {len(pp_errors)} failed")
     t.add_row("functions", str(len(functions)))
     if translated:
         t.add_row("supported by backend", f"{len(functions) - len(unsupported)}")

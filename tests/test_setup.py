@@ -14,7 +14,7 @@ def test_system_step_per_package_manager(monkeypatch):
     monkeypatch.setattr(plat, "package_manager", lambda: ("brew", "brew install"))
     step = setup.system_step()
     assert step is not None and step.argv[:2] == ["brew", "install"]
-    for pkg in ("opam", "bear", "cbmc"):
+    for pkg in ("opam", "cbmc"):
         assert pkg in step.argv
     monkeypatch.setattr(plat, "package_manager", lambda: ("apt-get", "sudo apt-get install -y"))
     step = setup.system_step()

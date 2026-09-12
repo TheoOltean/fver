@@ -145,16 +145,34 @@ def parse_compile_commands(
     return tus, warnings
 
 
+def header_dirs(repo_root: Path) -> list[str]:
+    """Every directory in the repository that holds a header, repo-relative,
+    shallowest first: the include path fver uses when it reads the source
+    directly (no build involved)."""
+    dirs: set[str] = set()
+    for h in repo_root.rglob("*.h"):
+        rel = h.relative_to(repo_root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        dirs.add(rel.parent.as_posix())
+    return sorted(dirs, key=lambda d: (d.count("/"), d))
+
+
 def synthesise(repo_root: Path, build: BuildConfig, compiler: str) -> list[TranslationUnit]:
-    """No build database: compile every included .c with the fallback flags."""
+    """Read the source directly: every included .c file, compiled with the
+    fallback flags, its own directory and every header directory in the
+    repository on the include path."""
     tus: list[TranslationUnit] = []
+    incs = header_dirs(repo_root)
     for file in sorted(repo_root.rglob("*.c")):
         if any(part.startswith(".") for part in file.relative_to(repo_root).parts):
             continue
         rel = file.relative_to(repo_root).as_posix()
         if not is_included(rel, build):
             continue
-        argv = [compiler, *build.fallback_flags, "-c", rel]
+        own = file.parent.relative_to(repo_root).as_posix()
+        order = [own] + [d for d in incs if d != own]
+        argv = [compiler, *build.fallback_flags, *[f"-I{d}" for d in order], "-c", rel]
         tus.append(
             TranslationUnit(
                 id=TranslationUnit.make_id(rel, argv),
@@ -251,11 +269,6 @@ def capture_build(
         warnings.extend(w)
         return BuildCapture(tus=tus, source=source, warnings=warnings)
 
-    warnings.append(
-        "no build system found; compiling every included .c file with "
-        f"fallback flags {build.fallback_flags}. If the project does build some other way, "
-        "set build.capture_command (e.g. 'bear -- make') or build.compile_commands."
-    )
     return BuildCapture(
-        tus=synthesise(repo_root, build, compiler), source="synthesised", warnings=warnings
+        tus=synthesise(repo_root, build, compiler), source="source", warnings=warnings
     )

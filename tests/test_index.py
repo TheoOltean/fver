@@ -72,8 +72,10 @@ def test_parse_both_forms_filters_and_dedupes(repo: Path) -> None:
 def test_capture_falls_back_to_synthesis(repo: Path) -> None:
     (repo / "compile_commands.json").unlink()
     cap = capture_build(repo, BuildConfig(fallback_flags=["-std=c99"]), compiler="cc")
-    assert cap.source == "synthesised"
-    assert any("no build system found" in w for w in cap.warnings)
+    assert cap.source == "source"
+    # the source is read directly: the file's own directory and every header dir are -I
+    argv = cap.tus[0].arguments
+    assert any(a.startswith("-I") for a in argv) and cap.warnings == []
     assert sorted(t.source_path for t in cap.tus) == ["src/net/parser.c", "src/util.c"]
     assert cap.tus[0].arguments[:2] == ["cc", "-std=c99"]
 
@@ -229,7 +231,7 @@ def test_capture_empty_result_falls_back_to_synthesis(tmp_path):
         compiler="cc",
         work_dir=work,
     )
-    assert cap.source == "synthesised"
+    assert cap.source == "source"
     assert any("empty" in w for w in cap.warnings)
     assert not (repo / "compile_commands.json").exists()
 
@@ -253,3 +255,28 @@ def test_capture_keeps_previous_good_capture_when_build_is_up_to_date(tmp_path):
     assert cap.source.startswith("captured(previous)")
     assert [t.arguments for t in cap.tus] == [["cc", "-DX", "-c", "a.c"]]
     assert not (work / "compile_commands.new.json").exists()
+
+
+def test_source_direct_include_path(tmp_path: Path) -> None:
+    from fver.index.compile_commands import header_dirs, synthesise
+
+    root = tmp_path / "r"
+    (root / "src" / "net").mkdir(parents=True)
+    (root / "include").mkdir()
+    (root / ".git").mkdir()
+    (root / "src" / "a.c").write_text("int a;")
+    (root / "src" / "net" / "b.c").write_text("int b;")
+    (root / "src" / "net" / "b.h").write_text("")
+    (root / "include" / "api.h").write_text("")
+    (root / ".git" / "x.h").write_text("")
+    assert header_dirs(root) == ["include", "src/net"]
+    tus = {t.source_path: t.arguments for t in synthesise(root, BuildConfig(), "cc")}
+    assert (
+        tus["src/net/b.c"][-3:] == ["-Iinclude", "-c", "src/net/b.c"]
+        or "-Isrc/net" in tus["src/net/b.c"]
+    )
+    # a file's own directory comes first, then the others, shallowest first
+    b = tus["src/net/b.c"]
+    assert b.index("-Isrc/net") < b.index("-Iinclude")
+    a = tus["src/a.c"]
+    assert a.index("-Isrc") < a.index("-Iinclude") < a.index("-Isrc/net")
