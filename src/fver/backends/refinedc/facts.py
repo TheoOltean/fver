@@ -305,6 +305,10 @@ SHIMS_DIR_NAME = "shims"
 # `ZLIB_INTERNAL` expands to `__attribute__((visibility("hidden")))`, which the
 # Cerberus parser rejects as `unexpected token after '('`).
 PRELUDE_HEADER = "fver_prelude.h"
+# Also force-included: Cerberus's own <setjmp.h> comes before every -I
+# directory and ends in #error, so the shim is injected first under the same
+# include guard (CONFIRMED against cerberus-lib/runtime/libc/include/setjmp.h).
+FORCE_INCLUDED_SHIMS = (PRELUDE_HEADER, "setjmp.h")
 SHIMMED_HEADERS = (
     "sys/types.h",
     "sys/stat.h",
@@ -315,6 +319,7 @@ SHIMMED_HEADERS = (
     "fcntl.h",
     "dlfcn.h",
     "strings.h",
+    "setjmp.h",
 )
 
 # Replicating RefinedC's preprocessor run (CONFIRMED against frontend/

@@ -309,3 +309,113 @@ def test_posix_includes_parse_with_shims(backend, repo, tu):
     )
     res = backend.translate(tup, [fn], repo)
     assert res.tu_error is None and res.supported == {"g": True}, res.tu_error
+
+
+LUA_LIKE_HDR = textwrap.dedent(
+    """\
+    #ifndef LOBJ_H
+    #define LOBJ_H
+    typedef double lua_Number;
+    typedef long long lua_Integer;
+    typedef union Value { lua_Number n; lua_Integer i; void *p; } Value;
+    typedef struct TValue { Value value_; int tt_; } TValue;
+    #define ttisint(o) ((o)->tt_ == 3)
+    #endif
+    """
+)
+LUA_LIKE_SRC = textwrap.dedent(
+    """\
+    #include <setjmp.h>
+    #include "lobj.h"
+    int tv_is_int(TValue *o) { return ttisint(o); }
+    lua_Number fadd(lua_Number a, lua_Number b) { return a + b; }
+    int fcmp(lua_Number a, lua_Number b) { return a < b; }
+    void tv_setflt(TValue *o, lua_Number d) { o->value_.n = d; o->tt_ = 19; }
+    lua_Number passthru(lua_Number a) { return a; }
+    int guarded(jmp_buf *jb) { if (setjmp(*jb) == 0) return 0; return 1; }
+    int plain(int x) { return x; }
+    """
+)
+TV_IS_INT_OK = textwrap.dedent(
+    """\
+    [[rc::parameters("t : Z")]]
+    [[rc::args("&own<struct<struct_TValue, uninit<union_Value>, t @ int<i32>>>")]]
+    [[rc::returns("{bool_to_Z (bool_decide (t = 3))} @ int<i32>")]]
+    int tv_is_int(TValue *o) { return ttisint(o); }
+    """
+)
+
+
+def _lua_like(backend, repo):
+    (repo / "src" / "lobj.h").write_text(LUA_LIKE_HDR)
+    (repo / "src" / "lua_like.c").write_text(LUA_LIKE_SRC)
+    tul = TranslationUnit(
+        id="lua1",
+        source_path="src/lua_like.c",
+        directory=str(repo),
+        arguments=["cc", "-Isrc", "-c", "src/lua_like.c"],
+    )
+    lines = LUA_LIKE_SRC.split("\n")
+    fns = []
+    for i, ln in enumerate(lines, start=1):
+        if ln and not ln.startswith("#"):
+            name = ln.split("(")[0].split()[-1].lstrip("*")
+            fns.append(
+                FunctionInfo(
+                    id=f"lua1:{name}",
+                    name=name,
+                    tu_id="lua1",
+                    source_path="src/lua_like.c",
+                    start_line=i,
+                    end_line=i,
+                    signature=name,
+                    body_hash="h" + name,
+                )
+            )
+    return tul, fns
+
+
+def test_opaque_floats_keep_the_file_and_isolate_float_arithmetic(backend, repo, tu):
+    """A struct holding a double and a <setjmp.h> include used to reject the
+    whole file. Now only functions that compute with floats are unsupported."""
+    tul, fns = _lua_like(backend, repo)
+    res = backend.translate(tul, fns, repo)
+    assert res.tu_error is None, res.tu_error
+    assert res.supported == {
+        "tv_is_int": True,
+        "fadd": False,
+        "fcmp": False,
+        "tv_setflt": True,
+        "passthru": True,
+        "guarded": True,
+        "plain": True,
+    }
+    for n in ("fadd", "fcmp"):
+        assert "floating-point" in res.reasons[n], res.reasons[n]
+    assert (
+        "typedef struct fver_f64 lua_Number;"
+        in (backend._shadow_root / "src" / "lobj.h").read_text()
+    )
+    assert "typedef double lua_Number;" in (repo / "src" / "lobj.h").read_text()
+
+
+def test_tag_read_on_tagged_value_with_opaque_float_verifies(backend, repo, tu):
+    from fver.backends.base import FunctionTask
+
+    tul, fns = _lua_like(backend, repo)
+    fn = next(f for f in fns if f.name == "tv_is_int")
+    task = FunctionTask(
+        function=fn,
+        tu=tul,
+        target=Target(),
+        repo_root=repo,
+        workdir=backend.workspace_dir / "checks" / "lua_tv",
+        source_text=LUA_LIKE_SRC,
+        function_text=LUA_LIKE_SRC.split("\n")[fn.start_line - 1] + "\n",
+        callee_specs={},
+        external_specs={},
+    )
+    res = backend.check(task, Submission(files={"function.c": TV_IS_INT_OK}), timeout_seconds=600)
+    assert res.outcome is CheckOutcome.OK, res.feedback
+    spliced = Path(res.artifacts["source"]).read_text()
+    assert "double" not in spliced and "setjmp" in spliced  # include kept, floats rewritten

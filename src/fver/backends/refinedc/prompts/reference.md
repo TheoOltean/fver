@@ -232,12 +232,36 @@ Coq-level locations (`Location: "f.c" [ 134 : 21 - 134 : 26 ]`) are in
 preprocessed coordinates; the harness translates them to source lines and
 quotes the line when it can. Columns are exact.
 
-Unsupported by the front-end, regardless of annotations: floating point
-(any `float`/`double` in the types the file sees), `<setjmp.h>`, variadic
-functions (`va_arg`/`va_end`), casts inside integer constant expressions
-(`char b[(int)(8 * sizeof(void *))]`), inline assembly, `_Atomic`.
-Supported: `goto`, `switch`, function pointers (`function_ptr<...>`),
-unions (`rc::union_tag`), bitwise operations, `static` locals as globals.
+Unsupported by the front-end, regardless of annotations: floating-point
+arithmetic, comparison and conversion (see below), variadic functions
+(`va_arg`/`va_end`), casts inside integer constant expressions
+(`char b[(int)(8 * sizeof(void *))]`), inline assembly, `_Atomic`, copying a
+whole union value. Supported: `goto`, `switch`, function pointers
+(`function_ptr<...>`), bitwise operations, `static` locals as globals,
+`<setjmp.h>` (as an include; a function that calls `setjmp`/`longjmp` cannot
+be verified).
+
+### Floating point is opaque
+
+The checker sees a copy of the code in which `float`, `double` and `long
+double` are replaced by same-size structs with no arithmetic: `struct
+fver_f32`, `struct fver_f64`, `struct fver_fld`. Consequences:
+
+- A function that only stores, copies, passes or returns float values can be
+  verified; one that computes with them is reported unsupported. Do not try
+  to annotate around this.
+- In annotations a float is a struct: the layout of a `double` field or
+  variable is `struct_fver_f64` (`struct_fver_f32`, `struct_fver_fld`). Type a
+  float you never read as `uninit<struct_fver_f64>`; `lua_Number`-style
+  typedefs resolve to the same layouts.
+- Structs you cannot annotate (they live in headers) are typed field by
+  field with `struct<struct_Tag, ty1, ty2, ...>`; a union member you do not
+  touch is `uninit<union_Tag>`. Example, a tagged value whose union holds a
+  double: `&own<struct<struct_TValue, uninit<union_Value>, t @ int<i32>>>`
+  lets the function read and compare the tag `t`. Reading or writing a union
+  *member* needs the union annotated with `rc::union_tag` at its definition,
+  which is not available from a function-only submission; say
+  `UNSUPPORTED:` in the Note if the function needs it.
 
 ## 8. Strict rules
 

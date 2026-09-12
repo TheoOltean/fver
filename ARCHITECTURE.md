@@ -19,6 +19,8 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | `backends/base.py` | The `Backend` protocol + Submission/CheckResult/FunctionTask/PromptContext | this IS the boundary |
 | `backends/registry.py` | Discovery via entry points (`fver.backends` group) + built-ins | by name only |
 | `backends/refinedc/` | RefinedC on Rocq. Annotation splicing, `refinedc check` invocation, output parsing, guardrails, prompt reference | yes |
+| `backends/refinedc/opaque.py` | Opaque floating point: rewrites `float`/`double`/`long double` to same-size structs in the TU copy and in shadow copies of project headers (`<workspace>/shadow/`, placed before the real include dirs); generates `fver_opaque.h`. Float-computing functions become unsupported; everything else in the file stays checkable | yes |
+| `backends/refinedc/shims/` | Header shims for the Cerberus front-end: POSIX headers it lacks (`-I` after project dirs) and `setjmp.h` (force-included under Cerberus's own guard because Cerberus's copy ends in `#error`) | yes |
 | `backends/null.py` | A fake backend for tests and pipeline dry runs | yes (trivially) |
 | `hunters/` | Bug finders: CBMC, Cerberus interpreter, sanitizers. Produce `Finding`s | no |
 | `agent/` | Anthropic client, prompt assembly, the propose -> check -> repair loop, retrieval of examples, budget, cheating detection | only via `Backend` |

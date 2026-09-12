@@ -337,8 +337,13 @@ def test_cpp_flags_forward_source_dir_includes_and_defines(
     backend: RefinedCBackend, task: FunctionTask
 ):
     flags = backend._cpp_flags(task.tu, task.repo_root)
-    assert flags[0] == f"-I{task.repo_root / 'src'}"
+    # The source's own directory leads the project dirs; with opaque floats on,
+    # its rewritten shadow twin comes first of all.
+    assert flags[0] == f"-I{backend._shadow_root / 'src'}"
+    assert flags[2] == f"-I{task.repo_root / 'src'}"
     assert f"-I{Path(task.tu.directory) / 'include'}" in flags and "-DFOO=1" in flags
+    backend.opaque_floats = False
+    assert backend._cpp_flags(task.tu, task.repo_root)[0] == f"-I{task.repo_root / 'src'}"
     argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=True)
     assert argv[:4] == [backend.refinedc_bin, "check", "--no-extra-analysis", "--no-build"]
     assert argv[-1] == "x.c"
@@ -627,6 +632,7 @@ def test_check_argv_force_includes_prelude(backend: RefinedCBackend, task: Funct
     argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=False)
     assert f"--include={mod._SHIMS_DIR / facts.PRELUDE_HEADER}" in argv
     backend.posix_shims = False
+    backend.opaque_floats = False  # its generated header is force-included too
     argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=False)
     assert not any(a.startswith("--include=") for a in argv)
 

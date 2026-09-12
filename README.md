@@ -190,6 +190,25 @@ The `null` backend accepts any submission containing `FVER_ACCEPT`; the
 fake client replays scripted responses. This exercises scan, the loop, the
 ledger, caching and staleness tracking with no external dependencies.
 
+## What the checker cannot see
+
+RefinedC's semantics has no floating point, and its front-end rejects a
+whole file as soon as a struct or union declaration contains a `float` or
+`double`. fver checks a copy of the code in which floating-point types are
+replaced by same-size structs without arithmetic (`struct fver_f64` and
+friends), and mirrors project headers with the same rewrite. A function
+that only stores, copies or passes float values can be verified; one that
+adds, compares or converts them is reported `unsupported` with that reason.
+This is sound for undefined-behaviour proofs because IEEE arithmetic has no
+undefined behaviour of its own and the memory layout is unchanged; what is
+lost is coverage of the functions that compute with floats. Switch it off
+with `backend.refinedc.opaque_floats = false`.
+
+Also unsupported per function: variadic functions, `setjmp`/`longjmp`
+callers (the include itself is fine), copying a whole union value, and
+reading or writing union members of a union that is not annotated at its
+definition. `fver scan` reports every one of these per function.
+
 ## Trust
 
 - The proof checker is the oracle. The LLM cannot make anything "verified";

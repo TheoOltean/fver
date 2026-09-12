@@ -12,6 +12,10 @@ Settings ([backend.refinedc] in config.toml), all optional:
   posix_shims         = true         add Cerberus's posix/ headers and fver's shim
                                      headers (-I, after the project's own) so files
                                      that include <unistd.h>, <sys/types.h>, ... parse
+  opaque_floats       = true         check a copy in which float/double/long double
+                                     are same-size structs without arithmetic, so a
+                                     struct holding a double no longer rejects the
+                                     whole file (see opaque.py for why this is sound)
   allowed_axioms      = []           extra axiom names the audit tolerates
 
 The backend never writes outside its workspace directory
@@ -43,7 +47,7 @@ from fver.backends.base import (
     TranslateResult,
 )
 from fver.backends.refinedc import annotations as ann
-from fver.backends.refinedc import facts
+from fver.backends.refinedc import facts, opaque
 from fver.backends.refinedc.parse_output import (
     classify_full,
     extract_frontend_errors,
@@ -140,6 +144,7 @@ class RefinedCBackend:
         self.defines: list[str] = list(self.settings.get("defines", []))
         self.forward_build_flags: bool = bool(self.settings.get("forward_build_flags", True))
         self.posix_shims: bool = bool(self.settings.get("posix_shims", True))
+        self.opaque_floats: bool = bool(self.settings.get("opaque_floats", True))
         self.allowed_axioms = set(facts.ALLOWED_AXIOMS) | set(
             self.settings.get("allowed_axioms", [])
         )
@@ -246,12 +251,31 @@ class RefinedCBackend:
         rel = self._proofs_dir(c_file).resolve().relative_to(self.workspace_dir.resolve())
         return self.workspace_dir / facts.DUNE_BUILD_DIR / rel
 
+    @property
+    def _shadow_root(self) -> Path:
+        return self.workspace_dir / "shadow"
+
+    def _sync_opaque(self, repo_root: Path | None) -> None:
+        """Refresh the opaque-float header and the rewritten shadow copies of
+        the project's headers (no-op when the feature is off)."""
+        if not self.opaque_floats:
+            return
+        opaque.write_opaque_header(self.workspace_dir, self.target)
+        if repo_root is not None:
+            opaque.sync_shadow_headers(Path(repo_root), self._shadow_root)
+
+    def _rewrite(self, text: str) -> str:
+        return opaque.rewrite_floats(text) if self.opaque_floats else text
+
     def _cpp_flags(self, tu: TranslationUnit | None, repo_root: Path | None) -> list[str]:
         """-I / -D for `refinedc check`: the original source's directory (so
         sibling headers resolve although we check a copy), then the captured
-        build's include dirs and defines, then configured extras."""
+        build's include dirs and defines, then configured extras. With opaque
+        floats on, each project directory is preceded by its shadow twin so
+        `#include "x.h"` finds the rewritten header first."""
         flags: list[str] = []
         seen: set[str] = set()
+        project_dirs: list[Path] = []
 
         def add_inc(d: str) -> None:
             p = Path(d)
@@ -260,6 +284,7 @@ class RefinedCBackend:
             key = str(p)
             if key not in seen:
                 seen.add(key)
+                project_dirs.append(p)
                 flags.append(facts.INCLUDE_FLAG_FMT.format(dir=key))
 
         if tu is not None and repo_root is not None:
@@ -289,6 +314,13 @@ class RefinedCBackend:
             add_inc(str(p))
         for m in self.defines:
             flags.append(facts.DEFINE_FLAG_FMT.format(macro=m))
+        if self.opaque_floats and repo_root is not None:
+            shadows: list[str] = []
+            for pdir in project_dirs:
+                sd = opaque.shadow_dir_for(pdir, Path(repo_root), self._shadow_root)
+                if sd is not None:
+                    shadows.append(facts.INCLUDE_FLAG_FMT.format(dir=str(sd)))
+            flags = shadows + flags
         if self.posix_shims:
             for shim in self._shim_dirs():
                 flags.append(facts.INCLUDE_FLAG_FMT.format(dir=str(shim)))
@@ -315,9 +347,15 @@ class RefinedCBackend:
         argv = [self.refinedc_bin, *facts.CHECK_ARGV, facts.NO_EXTRA_ANALYSIS_FLAG]
         if no_build:
             argv.append(facts.NO_BUILD_FLAG)
-        if self.posix_shims and (_SHIMS_DIR / facts.PRELUDE_HEADER).is_file():
+        if self.posix_shims:
+            for name in facts.FORCE_INCLUDED_SHIMS:
+                if (_SHIMS_DIR / name).is_file():
+                    argv.append(facts.INCLUDE_FILE_FLAG_FMT.format(file=str(_SHIMS_DIR / name)))
+        if self.opaque_floats:
             argv.append(
-                facts.INCLUDE_FILE_FLAG_FMT.format(file=str(_SHIMS_DIR / facts.PRELUDE_HEADER))
+                facts.INCLUDE_FILE_FLAG_FMT.format(
+                    file=str(self.workspace_dir / opaque.OPAQUE_HEADER)
+                )
             )
         argv += self._cpp_flags(tu, repo_root)
         argv += self.extra_check_args
@@ -342,8 +380,12 @@ class RefinedCBackend:
                     dir=str(Path(prefix) / "lib" / "refinedc" / "include")
                 )
             )
-        if self.posix_shims and (_SHIMS_DIR / facts.PRELUDE_HEADER).is_file():
-            argv += ["-include", str(_SHIMS_DIR / facts.PRELUDE_HEADER)]
+        if self.posix_shims:
+            for name in facts.FORCE_INCLUDED_SHIMS:
+                if (_SHIMS_DIR / name).is_file():
+                    argv += ["-include", str(_SHIMS_DIR / name)]
+        if self.opaque_floats:
+            argv += ["-include", str(self.workspace_dir / opaque.OPAQUE_HEADER)]
         argv += self._cpp_flags(tu, repo_root)
         argv += [facts.DEFINE_FLAG_FMT.format(macro=m) for m in facts.CPP_PREDEFINES]
         argv.append(str(c_file))
@@ -433,7 +475,9 @@ class RefinedCBackend:
         if not ann.has_refinedc_include(text):
             text = facts.HEADER_INCLUDE + "\n" + text
             offset = 1
+        text = self._rewrite(text)
         dest.write_text(text, encoding="utf-8")  # a copy; the user's file is untouched
+        self._sync_opaque(repo_root)
         if not self._have_refinedc():
             reason = "refinedc not installed; front-end check skipped"
             return TranslateResult(
@@ -585,6 +629,10 @@ class RefinedCBackend:
             dest.write_text(text, encoding="utf-8")
         else:
             tu_error = "front-end still failing after isolating every function"
+        if self.opaque_floats:
+            reasons = {n: opaque.explain_reason(r) for n, r in reasons.items()}
+            if tu_error:
+                tu_error = opaque.explain_reason(tu_error)
         if tu_error:
             for n in names:
                 if supported[n]:
@@ -787,7 +835,9 @@ class RefinedCBackend:
             (proofs_dir / facts.LEMMAS_FILE).write_text(lemmas_text, encoding="utf-8")
             lemmas_path = f"{self.coq_root}.{self._module_path(c_file)}"
         source, marker_line, shift = self._build_source(task, annotated, lemmas_path)
+        source = self._rewrite(source)
         c_file.write_text(source, encoding="utf-8")
+        self._sync_opaque(task.repo_root)
         artifacts = {"source": str(c_file)}
         if lemmas_text:
             artifacts["lemmas"] = str(proofs_dir / facts.LEMMAS_FILE)
