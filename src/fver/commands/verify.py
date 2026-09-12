@@ -114,7 +114,7 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
 
 
 def register(app: typer.Typer) -> None:
-    @app.command("verify")
+    @app.command("verify", hidden=True)
     def verify(
         function: list[str] = typer.Option(
             None, "--function", "-f", help="Function name (glob); repeatable."

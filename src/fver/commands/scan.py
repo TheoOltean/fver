@@ -15,7 +15,7 @@ log = logging.getLogger("fver.scan")
 
 
 def register(app: typer.Typer) -> None:
-    @app.command()
+    @app.command("scan", hidden=True)
     def scan(
         no_preprocess: bool = typer.Option(
             False, "--no-preprocess", help="Skip compiler preprocessing."

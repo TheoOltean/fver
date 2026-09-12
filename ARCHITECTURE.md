@@ -27,7 +27,9 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | `agent/protocol.py` | The agent protocol: task packaging, check, next, changed as dicts; shared by CLI and MCP | only via `Backend` |
 | `mcp/server.py` | MCP server over the protocol (`fver mcp`) | no |
 | `agent/invalidate.py` | Stale-proof tracking: explicit STALE claims when a body, callee contract, external spec or tool version changed; caller invalidation after a contract change | only via `Backend` |
-| `commands/` | One module per subcommand, each with `register(app)` | via AppContext |
+| `commands/prove.py` | `fver prove [TARGET...]`: resolve targets (repo, files, functions, globs), re-index if sources changed, CBMC over the selection, then the proof loop in dependency order. The only day-to-day verb besides `status` | via AppContext |
+| `tui.py` | The Textual view: tree of dirs/files/functions by status, detail pane, coverage/cost bar. `fver status` opens it read-only; `fver prove` runs the pipeline in a worker thread behind it and refreshes as claims land | no |
+| `commands/` | One module per subcommand, each with `register(app)`. Visible: setup, init, prove, status, report, mcp, config. Hidden (still work, documented in GUIDE.md under Advanced): scan, hunt, verify, show, doctor, docs, clean, and the `agent` group (task, check, next, changed) | via AppContext |
 | `commands/setup.py` | `fver setup`: installs every external tool (package manager for bear/cbmc/opam, then an opam switch `fver` with Rocq, Iris, Cerberus and RefinedC at pinned commits) and records the binary paths in the user config. Nothing is optional: missing tools are errors, never silently skipped | no |
 | `commands/docs.py` | `fver docs` and the `.fver/GUIDE.md` that `fver init` writes: layout, command reference generated from the Typer app, config reference from the pydantic defaults, prover workflow (mirrored by `.claude/skills/fver/SKILL.md`, test-enforced) | no |
 | `cli.py` | Typer app; imports command modules | no |
@@ -35,10 +37,11 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 ## Data flow
 
 ```
+fver prove  : [scan if stale] -> hunt over the selection -> verify in dependency order
 fver scan   : build/ -> extract/ -> ledger (TUs, functions) -> backend.translate -> ledger (unsupported)
 fver hunt   : hunters/ -> ledger (findings, BUG_FOUND claims)
 fver verify : ledger (next functions) -> agent.loop(backend) -> proofs/ + ledger (claims)
-fver status : ledger.summary
+fver status : ledger -> tui (or a table off a terminal)
 ```
 
 ## Proof lifecycle

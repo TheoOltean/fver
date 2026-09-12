@@ -27,7 +27,18 @@ def _fail(msg: str, code: int = 1) -> None:
     raise typer.Exit(code=code)
 
 
+agent_app = typer.Typer(
+    help="Session-mode primitives (what `fver mcp` exposes): task, check, next, changed.",
+    no_args_is_help=True,
+)
+
+
 def register(app: typer.Typer) -> None:
+    app.add_typer(agent_app, name="agent", hidden=True)
+    _register(agent_app)
+
+
+def _register(app: typer.Typer) -> None:
     @app.command("task")
     def task(
         function: str = typer.Argument(..., help="Function name or ledger id."),

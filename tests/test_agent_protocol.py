@@ -139,37 +139,37 @@ def test_changed_reports_stale_after_edit(repo: Path) -> None:
 
 def test_cli_commands_and_exit_codes(repo: Path) -> None:
     runner = CliRunner()
-    r = runner.invoke(app, ["next", "--json"])
+    r = runner.invoke(app, ["agent", "next", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 2
-    r = runner.invoke(app, ["task", "add", "--json"])
+    r = runner.invoke(app, ["agent", "task", "add", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["function"]["name"] == "add"
     sub = repo / ".fver" / "sub.c"
     sub.write_text(PLAIN_FN)
-    r = runner.invoke(app, ["check", "add", "--submission", str(sub)])
+    r = runner.invoke(app, ["agent", "check", "add", "--submission", str(sub)])
     assert r.exit_code == 1
     sub.write_text(ACCEPT_FN)
-    r = runner.invoke(app, ["check", "add", "--submission", str(sub), "--json"])
+    r = runner.invoke(app, ["agent", "check", "add", "--submission", str(sub), "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["verified"] is True
     r = runner.invoke(
         app,
-        ["check", "twice", "--submission", "-"],
+        ["agent", "check", "twice", "--submission", "-"],
         input="```c file=function.c\n/* FVER_ACCEPT */\nint twice(int x) { return add(x, x); }\n```\n",
     )
     assert r.exit_code == 0
     r = runner.invoke(app, ["show", "add", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["function"]["status"] == "verified"
-    r = runner.invoke(app, ["changed", "--json"])
+    r = runner.invoke(app, ["agent", "changed", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 0
-    r = runner.invoke(app, ["check", "missing", "--submission", str(sub)])
+    r = runner.invoke(app, ["agent", "check", "missing", "--submission", str(sub)])
     assert r.exit_code == 1
 
 
 def test_verify_section_of_config_supplies_defaults(repo: Path) -> None:
     runner = CliRunner()
     assert runner.invoke(app, ["config", "set", "verify.next_limit", "1"]).exit_code == 0
-    r = runner.invoke(app, ["next", "--json"])
+    r = runner.invoke(app, ["agent", "next", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 1
-    r = runner.invoke(app, ["next", "--json", "--limit", "5"])  # the flag still wins
+    r = runner.invoke(app, ["agent", "next", "--json", "--limit", "5"])  # the flag still wins
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 2
     assert runner.invoke(app, ["config", "set", "verify.limit", "1"]).exit_code == 0
     r = runner.invoke(app, ["verify", "--dry-run"])
@@ -178,5 +178,5 @@ def test_verify_section_of_config_supplies_defaults(repo: Path) -> None:
     r = runner.invoke(app, ["verify", "--dry-run", "--limit", "2"])
     assert r.exit_code == 0 and "twice" in r.output
     assert runner.invoke(app, ["config", "set", "verify.task_reference", "false"]).exit_code == 0
-    r = runner.invoke(app, ["task", "add"])
+    r = runner.invoke(app, ["agent", "task", "add"])
     assert r.exit_code == 0 and "# Task: prove `add`" in r.output and "rc::" not in r.output

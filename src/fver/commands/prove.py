@@ -9,6 +9,7 @@ the configured budget.
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -220,16 +221,36 @@ def register(app: typer.Typer) -> None:
         jobs: int | None = typer.Option(
             None, "--jobs", "-j", help="Functions proven concurrently (config: budget.parallelism)."
         ),
+        plain: bool = typer.Option(
+            False, "--plain", help="One line per function instead of the live view."
+        ),
         verbose: bool = typer.Option(False, "--verbose", "-v"),
     ) -> None:
-        """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order."""
+        """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order. Shows the live view on a terminal."""
         ctx = AppContext.load(need_backend=True)
         run_name = f"prove-{time.strftime('%Y%m%d-%H%M%S')}"
         setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name=run_name)
-        try:
-            code = run_prove(
-                ctx, list(targets or []), dry_run=dry_run, max_usd=max_usd, limit=limit, jobs=jobs
-            )
-        finally:
-            ctx.close()
-        raise typer.Exit(code)
+        tgts = list(targets or [])
+        if plain or dry_run or not sys.stdout.isatty():
+            try:
+                code = run_prove(
+                    ctx, tgts, dry_run=dry_run, max_usd=max_usd, limit=limit, jobs=jobs
+                )
+            finally:
+                ctx.close()
+            raise typer.Exit(code)
+        repo_root = ctx.ws.repo_root
+        ctx.close()  # the worker thread opens its own connections
+        from fver.tui import run_prove_with_tui
+
+        def worker(on_done) -> int:
+            wctx = AppContext.load(repo_root, need_backend=True)
+            try:
+                with console.capture():  # the live view replaces the line output
+                    return run_prove(
+                        wctx, tgts, max_usd=max_usd, limit=limit, jobs=jobs, on_done=on_done
+                    )
+            finally:
+                wctx.close()
+
+        raise typer.Exit(run_prove_with_tui(repo_root, worker))

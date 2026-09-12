@@ -48,7 +48,7 @@ def run_clean(ws: Workspace, all_: bool, yes: bool) -> list[Path]:
 
 
 def register(app: typer.Typer) -> None:
-    @app.command("clean")
+    @app.command("clean", hidden=True)
     def clean(
         all_: bool = typer.Option(
             False, "--all", help="Also remove the ledger and accepted proofs."

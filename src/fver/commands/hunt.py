@@ -171,7 +171,7 @@ def render_findings(findings: list[Finding]) -> None:
 
 
 def register(app: typer.Typer) -> None:
-    @app.command("hunt")
+    @app.command("hunt", hidden=True)
     def hunt(
         only: list[str] = typer.Option(
             None, "--only", help="Run only these hunters (cbmc, sanitizers)."

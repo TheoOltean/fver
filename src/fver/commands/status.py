@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict
 
 import typer
@@ -11,6 +12,7 @@ from rich.table import Table
 
 from fver.core.context import AppContext
 from fver.core.models import Status
+from fver.core.workspace import Workspace
 from fver.util.log import console
 
 STATUS_STYLE = {
@@ -31,10 +33,25 @@ def styled_status(status: str) -> str:
 def register(app: typer.Typer) -> None:
     @app.command("status")
     def status(
+        function: str | None = typer.Option(
+            None, "--function", "-f", help="Open on (or, off a terminal, print) one function."
+        ),
         limit: int = typer.Option(20, "--limit", "-n", help="Functions to list (by attack score)."),
         as_json: bool = typer.Option(False, "--json", help="Print the summary as JSON."),
+        plain: bool = typer.Option(False, "--plain", help="Print a table instead of the view."),
     ) -> None:
-        """Summary of what is proven, what is not, and what it cost."""
+        """What is proven, what is not, and why: a browsable view on a terminal, a table otherwise."""
+        if not as_json and not plain and sys.stdout.isatty():
+            from fver.tui import run_status
+
+            ws = Workspace.open()
+            run_status(ws.repo_root, select=function)
+            return
+        if function and not as_json:
+            from fver.commands.show import print_function
+
+            print_function(function)
+            return
         ctx = AppContext.load(need_backend=False)
         try:
             backend = ctx.backend_name

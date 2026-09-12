@@ -153,7 +153,7 @@ def render(rows: list[ToolStatus]) -> int:
 
 
 def register(app: typer.Typer) -> None:
-    @app.command("doctor")
+    @app.command("doctor", hidden=True)
     def doctor(
         online: bool = typer.Option(
             False, "--online", help="Also make one small API call to verify credentials."

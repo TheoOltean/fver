@@ -35,7 +35,7 @@ fver produces lives in this directory.
 | `logs/` | run logs and LLM transcripts | no |
 | `scratch/` | a place for submissions while proving by hand | no |
 
-Workflow: `fver doctor` -> `fver scan` -> `fver hunt` -> `fver verify` -> `fver status`.
+Workflow: `fver prove` (everything, a file or a function), then `fver status`.
 Run every command from anywhere inside the repository.
 """
 
@@ -44,7 +44,7 @@ PROVER_WORKFLOW = """\
 
 You are the prover. fver supplies the task, the rules, the proof checker,
 the audit and the bookkeeping; you supply the annotations and proofs. The
-checker is the only judge: nothing is verified until `fver check` says so.
+checker is the only judge: nothing is verified until `fver agent check` says so.
 
 ## Goal
 
@@ -53,16 +53,16 @@ changing any C code and without escape hatches.
 
 ## How it fits together
 
-- `fver next` lists what to prove, callees before callers, so contracts
+- `fver agent next` lists what to prove, callees before callers, so contracts
   exist before you need them.
-- `fver task <fn>` prints the packet for one function: the annotation
+- `fver agent task <fn>` prints the packet for one function: the annotation
   language reference (read it once per session, then use `--no-reference`),
   the function, its file context, the contracts of verified callees, trusted
   external specs, and the previous accepted submission if the code changed.
 - Write the annotated function (the full definition, code unchanged) to a
   scratch file under `.fver/` such as `.fver/scratch/<fn>.c`. Never edit the
   user's source files. Helper lemmas, if needed, go in a second file.
-- `fver check <fn> --submission .fver/scratch/<fn>.c [--lemmas ...]` runs
+- `fver agent check <fn> --submission .fver/scratch/<fn>.c [--lemmas ...]` runs
   the guardrails, the checker and the audit, records the result, and quotes
   the goal the checker could not close. Exit 0 means verified.
 - Iterate on the feedback. Stop when verified, when the budget you were
@@ -70,7 +70,7 @@ changing any C code and without escape hatches.
 - If the code has a genuine defect that no honest precondition rules out,
   do not force a proof: submit a reply that starts with `BUG:` and explains
   the triggering input. fver records it as a suspected bug for a human.
-- After you edit any C code, run `fver changed` to see which proofs went
+- After you edit any C code, run `fver agent changed` to see which proofs went
   stale and re-prove them; a stale proof is a proof of old code.
 
 ## Rules the checker enforces
@@ -83,7 +83,7 @@ changing any C code and without escape hatches.
 ## Reporting
 
 Tell the user what is verified, what is stale, and any `BUG:` reports, in
-plain words. `fver status` and `fver show <fn>` have the details.
+plain words. `fver status` (and `fver status -f <fn>`) has the details.
 """
 
 
@@ -101,18 +101,22 @@ def _is_group(cmd: Any) -> bool:
     return hasattr(cmd, "list_commands") and hasattr(cmd, "get_command")
 
 
-def _walk(group: Any, ctx: Any, prefix: str = "") -> Iterator[tuple[str, Any, bool]]:
+def _walk(
+    group: Any, ctx: Any, prefix: str = "", hidden: bool = False
+) -> Iterator[tuple[str, Any, bool, bool]]:
+    """(full name, command, is_group, is_hidden) for every command."""
     for name in group.list_commands(ctx):
         cmd = group.get_command(ctx, name)
-        if cmd is None or getattr(cmd, "hidden", False):
+        if cmd is None:
             continue
         full = f"{prefix}{name}"
+        h = hidden or bool(getattr(cmd, "hidden", False))
         if _is_group(cmd):
-            yield full, cmd, True
+            yield full, cmd, True, h
             sub_ctx = cmd.make_context(name, [], parent=ctx, resilient_parsing=True)
-            yield from _walk(cmd, sub_ctx, prefix=full + " ")
+            yield from _walk(cmd, sub_ctx, prefix=full + " ", hidden=h)
         else:
-            yield full, cmd, False
+            yield full, cmd, False, h
 
 
 def _cell(text: str) -> str:
@@ -126,11 +130,24 @@ def command_reference() -> str:
     out = [
         "## Commands",
         "",
+        "Day to day: `fver prove` (everything, a file, or a function) and `fver status`.",
         "Flags override the configuration for one run; without them the values in",
         "`config.toml` apply. `fver <command> --help` prints the same information.",
         "",
     ]
-    for full, cmd, is_group in _walk(root, ctx):
+    entries = list(_walk(root, ctx))
+    shown = [e for e in entries if not e[3]] + [("", None, False, True)]
+    shown += [e for e in entries if e[3]]
+    for full, cmd, is_group, _is_hidden in shown:
+        if cmd is None:
+            out += [
+                "## Advanced commands",
+                "",
+                "Hidden from `fver --help`. `fver prove` runs scan, hunt and verify for you;",
+                "`fver agent` is what the MCP server exposes for session mode.",
+                "",
+            ]
+            continue
         out.append(f"### `fver {full}`")
         out.append("")
         if cmd.help:
@@ -188,7 +205,7 @@ def render_docs() -> str:
 
 
 def register(app: typer.Typer) -> None:
-    @app.command("docs")
+    @app.command("docs", hidden=True)
     def docs(
         write: bool = typer.Option(
             False, "--write", help="Refresh .fver/GUIDE.md instead of printing."

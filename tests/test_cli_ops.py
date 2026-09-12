@@ -40,7 +40,13 @@ def test_init_creates_layout_and_detects_makefile(repo):
     assert (ws.root / ".gitignore").exists()
     # The workspace README documents every command, every config key and the workflow.
     readme = (ws.root / "GUIDE.md").read_text()
-    for needle in ("### `fver check`", "`--submission`", "[verify]", "next_limit", "## Goal"):
+    for needle in (
+        "### `fver prove`",
+        "### `fver agent check`",
+        "`--submission`",
+        "[verify]",
+        "## Goal",
+    ):
         assert needle in readme
     cfg = load_config(repo)
     assert cfg.project.name is None and ws.project_name == "proj"

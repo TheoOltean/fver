@@ -29,8 +29,13 @@ def _resolve(ctx: AppContext, ident: str, file: str | None) -> FunctionInfo | No
     return matches[0]
 
 
+def print_function(ident: str, file: str | None = None) -> None:
+    """Plain-text details for one function (used by `fver status -f NAME` off a terminal)."""
+    _show(ident, file, False)
+
+
 def register(app: typer.Typer) -> None:
-    @app.command("show")
+    @app.command("show", hidden=True)
     def show(
         ident: str = typer.Argument(..., help="Function name or ledger id (tu_id:name)."),
         file: str | None = typer.Option(
@@ -39,6 +44,11 @@ def register(app: typer.Typer) -> None:
         as_json: bool = typer.Option(False, "--json", help="Emit one JSON object."),
     ) -> None:
         """Details for one function: status, claim history, assumptions, proofs, findings, callers."""
+        _show(ident, file, as_json)
+
+
+def _show(ident: str, file: str | None, as_json: bool) -> None:
+    if True:
         ctx = AppContext.load(need_backend=False)
         try:
             if as_json:

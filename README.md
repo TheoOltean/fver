@@ -66,35 +66,32 @@ the SDK will pick up the profile. `fver doctor` shows which source is used.
 
 ```sh
 cd your-c-repo
-fver init          # creates .fver/: a short commented config.toml and GUIDE.md; detects the target
-fver doctor        # every tool present? credentials set?
-fver scan          # capture the build, index every function, run the backend front-end
-fver hunt          # CBMC (and the sanitizers over your tests, if hunters.test_command is set)
-fver verify        # let the LLM prove functions, highest attack surface first
-fver status        # what is proven
-fver show parse_header
-fver report        # full markdown report under .fver/reports/
+fver init                  # once: .fver/ with a short commented config and GUIDE.md
+fver prove                 # the whole repository, highest attack surface first, under the budget
+fver prove src/lzio.c      # one file
+fver prove luaZ_fill       # one function (its unproven callees come first)
+fver status                # what is proven, what is not, and why
 ```
 
-The proof stack is fixed: RefinedC on Rocq. `fver init` writes a short,
-commented `.fver/config.toml` holding only the project name and the detected
-target ABI. How the project builds is worked out at scan time
-(`compile_commands.json` if present, `bear -- make` for Makefiles, fallback
-flags otherwise) and never needs configuring for ordinary projects.
+`fver prove` does everything in order: it indexes the code if it has never
+been indexed or sources changed, runs CBMC over the selected functions so a
+function with a concrete bug is recorded instead of sent to the prover, then
+proves the rest in dependency order. On a terminal it shows a live view: a
+tree of directories, files and functions coloured by status, details of the
+selected function on the right, coverage and cost at the bottom. Off a
+terminal (CI, a pipe) it prints one line per function; `--plain` forces that.
+`--dry-run` lists what a run would touch and what it might cost.
 
-Everything that shapes a run lives in `.fver/config.toml`: which functions a
-run may take on (`[verify]`: `limit`, `retry_unresolved`, `follow_callees`,
-`next_limit`, `task_reference`), money and attempt caps (`[budget]`), the
-model (`[model]`), the bug finders (`[hunters]`). Read and write it with
-`fver config get|set|show`. Command-line flags such as `--limit`, `--max-usd`,
-`--no-deps`, `--model` exist to override the config for one run; `--dry-run`
-prints the plan and cost estimate without doing anything.
+`fver status` opens the same view read-only. `fver status --plain` prints a
+table, `fver status -f NAME` details one function, `fver report` writes
+markdown and JSON under `.fver/reports/`.
 
-`fver init` also writes `.fver/GUIDE.md`: the layout, every command with its
-options, every config key with its default, and the proving workflow, so an
-agent or a colleague working in the repository has the documentation next to
-the state. `fver docs` prints it; `fver docs --write` refreshes it after an
-upgrade.
+The config is `.fver/config.toml`: the model, its effort, and the budget per
+run and per function, each with a comment. `fver config set <key> <value>`
+changes a setting; `fver config show` prints all of them with their effective
+values, and `.fver/GUIDE.md` documents every one. The API key goes in
+`~/.fver/config.toml` via `fver config set --user model.api_key ...`, never
+in the repository.
 
 ## Two ways to run the prover
 
@@ -141,10 +138,10 @@ The same protocol is available as plain commands, so a session without MCP
 can drive it through the shell:
 
 ```sh
-fver next                                   # what to prove, callees first
-fver task luaZ_read > .fver/scratch/task.md # the packet: reference, code, contracts
-fver check luaZ_read --submission .fver/scratch/luaZ_read.c   # exit 0 = verified
-fver changed                                # after edits: which proofs went stale
+fver agent next                                   # what to prove, callees first
+fver agent task luaZ_read > .fver/scratch/task.md # the packet: reference, code, contracts
+fver agent check luaZ_read --submission .fver/scratch/luaZ_read.c   # exit 0 = verified
+fver agent changed                                # after edits: which proofs went stale
 ```
 
 To have proofs checked as you edit, add a cheap hook to `.claude/settings.json`
@@ -159,7 +156,7 @@ To have proofs checked as you edit, add a cheap hook to `.claude/settings.json`
         "hooks": [
           {
             "type": "command",
-            "command": "case \"$(jq -r .tool_input.file_path)\" in *.c|*.h) fver changed;; esac"
+            "command": "case \"$(jq -r .tool_input.file_path)\" in *.c|*.h) fver agent changed;; esac"
           }
         ]
       }
