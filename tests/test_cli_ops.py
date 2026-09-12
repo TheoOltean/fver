@@ -25,7 +25,6 @@ def repo(tmp_path, monkeypatch):
     (d / "src" / "a.c").write_text("int f(void){return 1;}")
     (d / "Makefile").write_text("all:\n\tcc src/a.c\n")
     monkeypatch.chdir(d)
-    monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))  # ignore the user's real ~/.fver
     return d
 
 
@@ -56,28 +55,34 @@ def test_init_creates_layout_and_detects_makefile(repo):
     text = (ws.root / "config.toml").read_text()
     for key in ('api_key = ""', "effort", "max_usd_per_run", "max_usd_per_function"):
         assert key in text, key
-    # An unfilled key in the project file does not hide one set at user level.
-    assert (
-        runner.invoke(app, ["config", "set", "--user", "model.api_key", "sk-user"]).exit_code == 0
-    )
-    assert load_config(repo).model.api_key == "sk-user"
+    # An unfilled key counts as unset; the file is not committed, so a key may go in it.
+    assert load_config(repo).model.api_key is None
+    assert "config.toml" in (ws.root / ".gitignore").read_text()
+    assert runner.invoke(app, ["config", "set", "model.api_key", "sk-here"]).exit_code == 0
+    assert load_config(repo).model.api_key == "sk-here"
     assert "[target]" not in text and "[project]" not in text
     # Nothing about the build is stored; scan detects it. The file is commented.
     assert cfg.build.capture_command is None and cfg.build.compile_commands is None
     text = (ws.root / "config.toml").read_text()
-    assert text.startswith("# fver project configuration") and "[build]" not in text
-    assert 'backend = "refinedc"' not in text and "# api_key: paste your Anthropic key" in text
+    assert text.startswith("# fver configuration for this project") and "[build]" not in text
+    assert 'backend = "refinedc"' not in text and "# api_key: your Anthropic key" in text
     assert "source: read directly" in r.output
     # user tree untouched apart from .fver
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]
 
 
-def test_init_force_resets_config(repo):
-    assert runner.invoke(app, ["init"]).exit_code == 0
-    r = runner.invoke(app, ["init", "--force", "--backend", "null", "--name", "other"])
-    assert r.exit_code == 0
-    cfg = load_config(repo)
-    assert cfg.project.backend == "null" and cfg.project.name == "other"
+def test_config_show_and_validation(repo):
+    assert runner.invoke(app, ["init", "--backend", "null"]).exit_code == 0
+    assert load_config(repo).project.backend == "null"
+    r = runner.invoke(app, ["config", "set", "budget.max_attempts_per_function", "many"])
+    assert r.exit_code != 0
+    assert load_config(repo).budget.max_attempts_per_function == 8
+    r = runner.invoke(app, ["config"])
+    assert r.exit_code == 0, r.output
+    assert str(repo / ".fver" / "config.toml") in r.output and "[project]" in r.output
+    assert runner.invoke(app, ["config", "set", "budget.max_usd_per_run", "50"]).exit_code == 0
+    project = (repo / ".fver" / "config.toml").read_text()
+    assert "max_usd_per_run = 50" in project and project.count("\n\n\n") == 0
 
 
 def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch):
@@ -85,7 +90,6 @@ def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch)
     d.mkdir()
     (d / "CMakeLists.txt").write_text("project(x C)")
     monkeypatch.chdir(d)
-    monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
     from fver.core.config import BuildConfig
     from fver.index.detect import detect_build, resolve_build
 
@@ -104,9 +108,9 @@ def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch)
 # --- config -------------------------------------------------------------
 
 
-def test_config_get_set_roundtrip(repo):
+def test_config_set_roundtrip(repo):
     runner.invoke(app, ["init"])
-    assert runner.invoke(app, ["config", "get", "model.effort"]).output.strip() == "high"
+    assert 'effort = "high"' in runner.invoke(app, ["config"]).output
     r = runner.invoke(app, ["config", "set", "model.effort", "xhigh"])
     assert r.exit_code == 0, r.output
     assert load_config(repo).model.effort == "xhigh"
@@ -130,28 +134,6 @@ def test_config_get_set_roundtrip(repo):
     r = runner.invoke(app, ["config", "set", "budget.max_attempts_per_function", "many"])
     assert r.exit_code != 0
     assert load_config(repo).budget.max_attempts_per_function == 8
-    assert runner.invoke(app, ["config", "get", "nope.key"]).exit_code == 1
-    assert str(repo / ".fver" / "config.toml") in runner.invoke(app, ["config", "path"]).output
-    assert "[project]" in runner.invoke(app, ["config", "show"]).output
-
-
-def test_config_set_never_copies_user_settings_into_the_project(repo):
-    runner.invoke(app, ["init"])
-    assert (
-        runner.invoke(app, ["config", "set", "--user", "model.api_key", "sk-secret"]).exit_code == 0
-    )
-    assert (
-        runner.invoke(
-            app, ["config", "set", "--user", "backend.refinedc.refinedc_bin", "/opt/rc"]
-        ).exit_code
-        == 0
-    )
-    assert runner.invoke(app, ["config", "set", "budget.max_usd_per_run", "50"]).exit_code == 0
-    project = (repo / ".fver" / "config.toml").read_text()
-    assert "max_usd_per_run = 50" in project
-    assert "sk-secret" not in project and "/opt/rc" not in project
-    assert load_config(repo).model.api_key == "sk-secret"  # still effective through the merge
-    assert project.count("\n\n\n") == 0  # no double blank lines
 
 
 def test_init_again_refreshes_the_guide_and_keeps_the_config(repo):
@@ -163,8 +145,6 @@ def test_init_again_refreshes_the_guide_and_keeps_the_config(repo):
     assert r.exit_code == 0 and "Refreshed GUIDE.md" in r.output
     assert guide.read_text() == docs_cmd.render_docs()
     assert load_config(repo).budget.max_usd_per_run == 7
-    assert runner.invoke(app, ["init", "--force"]).exit_code == 0
-    assert load_config(repo).budget.max_usd_per_run == 200
 
 
 def test_prover_workflow_matches_claude_skill():

@@ -26,14 +26,13 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     (root / "src" / "m.c").write_text(SRC)
     (root / "other.c").write_text("int top(void) { return 1; }\n")
     monkeypatch.chdir(root)
-    monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     assert runner.invoke(app, ["init", "--backend", "null"]).exit_code == 0
-    assert runner.invoke(app, ["prove", "--dry-run"]).exit_code == 0
+    assert runner.invoke(app, ["status"]).exit_code == 0  # indexes
     fake = root / ".fver" / "fake.json"
     fake.write_text(json.dumps([ACCEPT.format(body="int add(int a, int b) { return a + b; }")]))
     monkeypatch.setenv("FVER_FAKE_LLM", str(fake))
-    assert runner.invoke(app, ["prove", "add", "--plain"]).exit_code == 0
+    assert runner.invoke(app, ["prove", "add"]).exit_code == 0
     return root
 
 

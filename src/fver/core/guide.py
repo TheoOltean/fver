@@ -83,7 +83,7 @@ changing any C code and without escape hatches.
 ## Reporting
 
 Tell the user what is verified, what is stale, and any `BUG:` reports, in
-plain words. `fver status` (and `fver status -f <fn>`) has the details.
+plain words. `fver status` (and `fver status <fn>`) has the details.
 """
 
 
@@ -180,11 +180,9 @@ def config_reference() -> str:
     return (
         "## Configuration\n"
         "\n"
-        "Settings live in `.fver/config.toml` (commit it). Optional user-level defaults\n"
-        "in `~/.fver/config.toml` are merged underneath; put credentials such as\n"
-        "`model.api_key` there, never in the project file. Read and write with\n"
-        "`fver config get <key>`, `fver config set <key> <value>` (`--user` for the\n"
-        "user-level file) and `fver config show` (the effective merged configuration).\n"
+        "One file, `.fver/config.toml`, ignored by git because it holds the API key.\n"
+        "`fver config` prints every setting with its effective value and\n"
+        "`fver config set <key> <value>` changes one.\n"
         "\n"
         "Sections: `[project]` backend and property class; `[build]` how to find or\n"
         "capture the build; `[target]` the ABI the proofs are for; `[model]` which LLM\n"

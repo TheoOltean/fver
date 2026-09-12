@@ -45,4 +45,4 @@ changing any C code and without escape hatches.
 ## Reporting
 
 Tell the user what is verified, what is stale, and any `BUG:` reports, in
-plain words. `fver status` (and `fver status -f <fn>`) has the details.
+plain words. `fver status` (and `fver status <fn>`) has the details.

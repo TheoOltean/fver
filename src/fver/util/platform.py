@@ -96,6 +96,22 @@ def compiler_supports(compiler: str, flags: tuple[str, ...]) -> bool:
     return r.returncode == 0
 
 
+OPAM_SWITCH = "fver"  # the switch `fver setup` creates
+
+
+def switch_bin() -> Path:
+    """Where the proof toolchain's executables are."""
+    root = os.environ.get("OPAMROOT") or str(Path.home() / ".opam")
+    return Path(root) / OPAM_SWITCH / "bin"
+
+
+def tool(name: str) -> str:
+    """The executable to run for `name`: the copy in the fver opam switch when
+    there is one, else the bare name (PATH)."""
+    p = switch_bin() / name
+    return str(p) if p.exists() else name
+
+
 def user_bin_dir() -> Path:
     """Where user-level installs put executables (uv, pipx, pip --user)."""
     return Path.home() / ".local" / "bin"

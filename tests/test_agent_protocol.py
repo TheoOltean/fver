@@ -27,7 +27,7 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.chdir(root)
     runner = CliRunner()
     assert runner.invoke(app, ["init", "--backend", "null"]).exit_code == 0
-    r = runner.invoke(app, ["prove", "--dry-run"])
+    r = runner.invoke(app, ["status"])  # indexes
     assert r.exit_code == 0, r.output
     return root
 
@@ -156,23 +156,27 @@ def test_cli_commands_and_exit_codes(repo: Path) -> None:
         input="```c file=function.c\n/* FVER_ACCEPT */\nint twice(int x) { return add(x, x); }\n```\n",
     )
     assert r.exit_code == 0
-    r = runner.invoke(app, ["status", "-f", "add", "--json"])
-    assert r.exit_code == 0 and json.loads(r.stdout)["function"]["status"] == "verified"
+    r = runner.invoke(app, ["status", "add"])
+    assert r.exit_code == 0 and "verified" in r.stdout and "src/m.c" in r.stdout
     r = runner.invoke(app, ["agent", "changed", "--json"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 0
     r = runner.invoke(app, ["agent", "check", "missing", "--submission", str(sub)])
     assert r.exit_code == 1
 
 
-def test_budget_limits_a_run_and_flags_override(repo: Path) -> None:
+def test_budget_limits_a_run(repo: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["agent", "next", "--json", "--limit", "1"])
     assert r.exit_code == 0 and json.loads(r.stdout)["count"] == 1
     assert runner.invoke(app, ["config", "set", "budget.max_functions_per_run", "1"]).exit_code == 0
-    r = runner.invoke(app, ["prove", "--dry-run"])
-    assert r.exit_code == 0, r.output
-    assert "add" in r.output and "twice" not in r.output
-    r = runner.invoke(app, ["prove", "--dry-run", "--limit", "2"])
-    assert r.exit_code == 0 and "twice" in r.output
+    from fver.commands.prove import select_functions
+
+    ctx = _ctx(repo)
+    try:
+        limit = ctx.config.budget.max_functions_per_run or None
+        assert [f.name for f in select_functions(ctx, [], limit)] == ["add"]
+        assert [f.name for f in select_functions(ctx, [], None)] == ["add", "twice"]
+    finally:
+        ctx.close()
     r = runner.invoke(app, ["agent", "task", "add", "--no-reference"])
     assert r.exit_code == 0 and "# Task: prove `add`" in r.output and "rc::" not in r.output

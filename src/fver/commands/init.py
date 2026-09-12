@@ -15,23 +15,24 @@ from fver.core.config import (
     save_config,
 )
 from fver.core.guide import render_docs
-from fver.core.workspace import Workspace
+from fver.core.workspace import GITIGNORE_BODY, Workspace
 from fver.index.detect import detect_build
 from fver.util.log import console
 
 
-def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Path:
+def run_init(repo_root: Path, backend: str) -> Path:
     if not repo_root.is_dir():
         raise typer.BadParameter(f"{repo_root} is not a directory")
     cfg_path = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_NAME
-    if cfg_path.exists() and not force:
-        # Already initialised: refresh the documentation, leave the config alone.
+    if cfg_path.exists():
+        # Already initialised: refresh the managed files, leave the config alone.
         ws = Workspace.open(repo_root)
         (ws.root / "GUIDE.md").write_text(render_docs(), encoding="utf-8")
+        (ws.root / ".gitignore").write_text(GITIGNORE_BODY, encoding="utf-8")
         console.print(f"Already initialised: {ws.root}. Refreshed GUIDE.md; config untouched.")
         return cfg_path
     _build, notes = detect_build(repo_root)  # shown to the user; scan re-detects, nothing stored
-    cfg = FverConfig(project=ProjectConfig(name=name, backend=backend))
+    cfg = FverConfig(project=ProjectConfig(backend=backend))
     ws = Workspace.create(repo_root, cfg)
     save_config(repo_root, cfg)
     from fver.core.context import resolve_target
@@ -45,15 +46,16 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
     console.print(
         f"  • model {cfg.model.model} at effort {cfg.model.effort}; budget "
         f"${cfg.budget.max_usd_per_run:.0f} per run, ${cfg.budget.max_usd_per_function:.0f} "
-        "per function (edit .fver/config.toml)"
+        "per function"
     )
-    console.print("  • API key (API mode only): fver config set --user model.api_key sk-ant-...")
     for n in notes:
         console.print(f"  • {n}")
-    console.print("  • settings: .fver/config.toml (commented); everything else: .fver/GUIDE.md")
     console.print(
-        "\nNext: fver prove            # the whole repository; or a file, or a function\n"
-        "      fver status           # what is proven"
+        f"  • settings and API key: {cfg_path} (not committed); everything else: .fver/GUIDE.md"
+    )
+    console.print(
+        "\nNext: fver status           # index the code and show what is provable\n"
+        "      fver prove            # the whole repository; or a file, or a function"
     )
     return cfg_path
 
@@ -62,15 +64,9 @@ def register(app: typer.Typer) -> None:
     @app.command("init")
     def init(
         backend: str = typer.Option("refinedc", "--backend", "-b", hidden=True),
-        name: str | None = typer.Option(
-            None, "--name", help="Project name (default: directory name)."
-        ),
-        force: bool = typer.Option(
-            False, "--force", help="Reset an existing config.toml to the defaults."
-        ),
         path: Path = typer.Option(
             Path("."), "--path", help="Repository root (default: cwd).", hidden=True
         ),  # noqa: B008
     ) -> None:
         """Create .fver/ in this repository."""
-        run_init(path.resolve(), backend, name, force)
+        run_init(path.resolve(), backend)

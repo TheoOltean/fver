@@ -1,29 +1,20 @@
-"""fver config: get / set / show configuration values."""
+"""`fver config`: print the effective configuration; `fver config set` changes one value."""
 
 from __future__ import annotations
 
-import os
 import tomllib
-from pathlib import Path
 from typing import Any
 
 import tomli_w
 import typer
 from pydantic import ValidationError
 
-from fver.core.config import (
-    FverConfig,
-    _diff,
-    _drop_none,
-    load_project_config,
-    save_config,
-    user_config_path,
-)
+from fver.core.config import FverConfig, _drop_none, load_config, save_config
 from fver.core.workspace import Workspace
-from fver.util.log import console
 
 config_app = typer.Typer(
-    help="Get or set configuration values in .fver/config.toml.", no_args_is_help=True
+    help="Print the effective configuration, or `set` one value in .fver/config.toml.",
+    invoke_without_command=True,
 )
 
 
@@ -71,71 +62,28 @@ def _render(value: Any) -> str:
     return str(value)
 
 
-def set_user_value(key: str, raw: str) -> Path:
-    """Set one key in the user-level config, keeping the file minimal."""
-    path = user_config_path()
-    data = (
-        tomllib.loads(path.read_text(encoding="utf-8", errors="replace")) if path.exists() else {}
-    )
-    new_cfg = set_value(FverConfig.model_validate(data), key, raw)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    defaults = FverConfig().model_dump(mode="json")
-    minimal = _diff(defaults, new_cfg.model_dump(mode="json"))
-    path.write_text(tomli_w.dumps(_drop_none(minimal)), encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-    return path
-
-
-@config_app.command("get")
-def config_get(key: str = typer.Argument(..., help="Dotted key, e.g. model.effort")) -> None:
+@config_app.callback()
+def config_show(ctx: typer.Context) -> None:
+    """Print every setting with its effective value (the file, then the defaults)."""
+    if ctx.invoked_subcommand is not None:
+        return
     ws = Workspace.open()
-    try:
-        typer.echo(_render(get_value(ws.config, key)))
-    except KeyError:
-        console.print(f"[red]no such key:[/] {key}")
-        raise typer.Exit(code=1) from None
+    typer.echo(f"# {ws.config_path}")
+    typer.echo(tomli_w.dumps(_drop_none(ws.config.model_dump(mode="json"))))
 
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Dotted key, e.g. budget.max_usd_per_function"),
+    key: str = typer.Argument(..., help="Dotted key, e.g. model.api_key or budget.max_usd_per_run"),
     value: str = typer.Argument(
-        ..., help='TOML literal or bare string, e.g. 5.0, true, "x", ["a","b"]'
-    ),
-    user: bool = typer.Option(
-        False,
-        "--user",
-        "-u",
-        help="Write to the user-level config (~/.fver/config.toml) instead of the "
-        "project's. Use this for credentials such as model.api_key.",
+        ..., help="TOML literal or bare string, e.g. 5.0, true, sk-ant-..."
     ),
 ) -> None:
-    if user:
-        typer.echo(f"{key} set in {set_user_value(key, value)}")
-        return
+    """Change one value in .fver/config.toml."""
     ws = Workspace.open()
-    if key == "model.api_key":
-        console.print(
-            "[yellow]warning:[/] writing an API key into the project config, which is meant "
-            "to be committed. Prefer `fver config set --user model.api_key ...`."
-        )
-    new_cfg = set_value(load_project_config(ws.repo_root), key, value)
+    new_cfg = set_value(load_config(ws.repo_root), key, value)
     save_config(ws.repo_root, new_cfg)
     typer.echo(f"{key} = {_render(get_value(new_cfg, key))}")
-
-
-@config_app.command("path")
-def config_path() -> None:
-    typer.echo(str(Workspace.open().config_path))
-
-
-@config_app.command("show")
-def config_show() -> None:
-    ws = Workspace.open()
-    typer.echo(tomli_w.dumps(_drop_none(ws.config.model_dump(mode="json"))))
 
 
 def register(app: typer.Typer) -> None:

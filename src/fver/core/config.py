@@ -1,9 +1,8 @@
 """Configuration schema and loading.
 
-Layout:
-  <repo>/.fver/config.toml           project config (created by `fver init`)
-  ~/.fver/config.toml                user-level config (credentials, model), merged
-                                     underneath; FVER_HOME overrides the ~/.fver location
+One file per project: <repo>/.fver/config.toml, created by `fver init` and
+ignored by git (it holds the API key). Everything not written there takes
+the default below.
 
 Backend-specific settings live under [backend.<name>] and are passed to the
 backend untouched, so adding a backend never requires editing this file.
@@ -11,7 +10,6 @@ backend untouched, so adding a backend never requires editing this file.
 
 from __future__ import annotations
 
-import os
 import re
 import tomllib
 from pathlib import Path
@@ -69,10 +67,8 @@ class TargetConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    # Credentials. Prefer the user-level config (~/.fver/config.toml,
-    # `fver config set --user model.api_key sk-ant-...`) so the key never lands
-    # in a committed project config. Falls back to ANTHROPIC_API_KEY /
-    # ANTHROPIC_AUTH_TOKEN / an `ant auth login` profile when unset.
+    # Falls back to ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / an
+    # `ant auth login` profile when unset.
     api_key: str | None = None
     base_url: str | None = None
     model: str = "claude-fable-5-1"
@@ -115,50 +111,15 @@ class FverConfig(BaseModel):
         return dict(self.backend.get(name or self.project.backend, {}))
 
 
-def user_home() -> Path:
-    """fver's own directory for the user: ~/.fver (or $FVER_HOME)."""
-    return Path(os.environ.get("FVER_HOME") or (Path.home() / CONFIG_DIR_NAME))
-
-
-def user_config_path() -> Path:
-    return user_home() / CONFIG_FILE_NAME
-
-
-def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
-    out = dict(base)
-    for k, v in over.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
-
-
-def load_project_config(repo_root: Path) -> FverConfig:
-    """Only the project's own file, without the user-level layer. This is what
-    `fver config set` edits, so user settings (tool paths, credentials) never
-    get copied into a file that is meant to be committed."""
+def load_config(repo_root: Path) -> FverConfig:
+    """The project's config.toml over the defaults. An empty string means
+    'not filled in' and counts as unset."""
     pp = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_NAME
     data = tomllib.loads(pp.read_text(encoding="utf-8", errors="replace")) if pp.exists() else {}
-    return FverConfig.model_validate(data)
-
-
-def load_config(repo_root: Path) -> FverConfig:
-    """Load user defaults then the project config on top."""
-    data: dict[str, Any] = {}
-    up = user_config_path()
-    if up.exists():
-        data = _deep_merge(data, tomllib.loads(up.read_text(encoding="utf-8", errors="replace")))
-    pp = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_NAME
-    if pp.exists():
-        project = tomllib.loads(pp.read_text(encoding="utf-8", errors="replace"))
-        data = _deep_merge(data, _drop_empty(project))
-    return FverConfig.model_validate(data)
+    return FverConfig.model_validate(_drop_empty(data))
 
 
 def _drop_empty(obj: Any) -> Any:
-    """An empty string in the project file means 'not filled in': it must not
-    shadow a value from the user-level config."""
     if isinstance(obj, dict):
         return {k: _drop_empty(v) for k, v in obj.items() if v != ""}
     return obj
@@ -192,10 +153,10 @@ def _diff(defaults: Any, current: Any) -> Any:
 
 
 CONFIG_HEADER = """\
-# fver project configuration. Only settings that differ from the defaults are
-# written here; `fver config show` prints every setting with its effective
-# value and `fver config set <key> <value>` changes one. .fver/GUIDE.md
-# documents all of them.
+# fver configuration for this project. Not committed (.fver/.gitignore lists
+# it), so the API key lives here. Only settings that differ from the defaults
+# are written; `fver config` prints every setting with its effective value and
+# `fver config set <key> <value>` changes one. .fver/GUIDE.md documents them.
 """
 
 ALWAYS_WRITTEN = (
@@ -219,14 +180,15 @@ SECTION_COMMENTS = {
         "# and set compile_commands, or set capture_command. include/exclude pick the sources."
     ),
     "model": (
-        "api_key: paste your Anthropic key, or leave empty and run\n"
-        "# `fver config set --user model.api_key sk-ant-...` to keep it in ~/.fver/config.toml,\n"
-        "# outside the repository (this file is meant to be committed). effort: low | medium |\n"
-        "# high | xhigh | max."
+        "api_key: your Anthropic key (or leave empty and export ANTHROPIC_API_KEY).\n"
+        "# effort: low | medium | high | xhigh | max."
     ),
     "budget": "Money, attempt and size caps, per function and per run.",
     "hunters": "CBMC, run over each function before it is sent to the prover.",
-    "backend": "Proof-checker settings: tool paths (`fver setup` records them in ~/.fver), extra includes and defines.",
+    "backend": (
+        "Proof-checker settings. Tools are found in the opam switch `fver setup` creates;\n"
+        "# refinedc_bin / coqc_bin / dune_bin override that."
+    ),
 }
 
 
@@ -244,10 +206,8 @@ def _with_comments(toml: str) -> str:
 
 def dumps_config(cfg: FverConfig, minimal: bool = True) -> str:
     """Serialise a config. `minimal` writes only values that differ from the
-    defaults, so a project file never shadows user-level settings such as the
-    model or API key with copies of the defaults, and adds explanatory
-    comments. `fver config show` prints the effective, fully merged
-    configuration without comments."""
+    defaults, with explanatory comments; `fver config` prints the effective
+    configuration in full without them."""
     data = cfg.model_dump(mode="json")
     if not minimal:
         return tomli_w.dumps(_drop_none(data))

@@ -26,8 +26,9 @@ from typing import Any
 
 from fver.core.config import CONFIG_DIR_NAME, CONFIG_FILE_NAME, FverConfig, load_config
 
-GITIGNORE_BODY = """# Managed by fver. Everything here is derived state except config.toml,
-# ledger.sqlite, proofs/ and external/.
+GITIGNORE_BODY = """# Managed by fver. Commit ledger.sqlite, proofs/ and external/. config.toml
+# holds the API key and stays local; the rest is derived state.
+config.toml
 work/
 backend/
 cache/

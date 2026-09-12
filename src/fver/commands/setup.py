@@ -26,7 +26,7 @@ import typer
 from fver.util import platform as plat
 from fver.util.log import console, err_console
 
-SWITCH = "fver"
+SWITCH = plat.OPAM_SWITCH
 OCAML = "ocaml-base-compiler.4.14.2"
 REPOS = {
     "coq-released": "https://coq.inria.fr/opam/released",
@@ -74,11 +74,6 @@ def _switch_exists() -> bool:
         ["opam", "switch", "list", "--short"], capture_output=True, text=True, check=False
     )
     return r.returncode == 0 and SWITCH in r.stdout.split()
-
-
-def _switch_bin() -> Path:
-    root = os.environ.get("OPAMROOT") or str(Path.home() / ".opam")
-    return Path(root) / SWITCH / "bin"
 
 
 def system_step() -> Step | None:
@@ -145,16 +140,7 @@ def _run(step: Step) -> None:
         raise typer.Exit(code=r.returncode or 1)
 
 
-def record_tool_paths() -> None:
-    """Point the user-level config at the switch's binaries."""
-    from fver.commands.config_cmd import set_user_value
-
-    b = _switch_bin()
-    for key, name in (("refinedc_bin", "refinedc"), ("coqc_bin", "coqc"), ("dune_bin", "dune")):
-        set_user_value(f"backend.refinedc.{key}", f'"{b / name}"')
-
-
-def run_setup(jobs: int) -> None:
+def run_setup() -> None:
     if not shutil.which("cc") and not shutil.which("clang") and not shutil.which("gcc"):
         err_console.print(
             "[red]No C compiler found.[/] Install your platform's developer tools first "
@@ -171,13 +157,12 @@ def run_setup(jobs: int) -> None:
         )
         raise typer.Exit(code=1)
     _run(sys_step)
-    for step in opam_steps(jobs):
+    for step in opam_steps(max(2, (os.cpu_count() or 4) - 1)):
         if step.skip_if:
             console.print(f"[bold]==>[/] {step.title}: already done", style="dim")
             continue
         _run(step)
-    record_tool_paths()
-    console.print(f"\n[green]Toolchain installed[/] in {_switch_bin().parent}.")
+    console.print(f"\n[green]Toolchain installed[/] in {plat.switch_bin().parent}.")
     from fver.core.doctor import collect_statuses, render
 
     rows, _ = collect_statuses()
@@ -188,10 +173,6 @@ def run_setup(jobs: int) -> None:
 
 def register(app: typer.Typer) -> None:
     @app.command("setup")
-    def setup(
-        jobs: int = typer.Option(
-            max(2, (os.cpu_count() or 4) - 1), "--jobs", "-j", help="Parallel opam build jobs."
-        ),
-    ) -> None:
+    def setup() -> None:
         """Install every tool fver needs: cbmc, and an opam switch with Rocq, Iris, Cerberus and RefinedC. Idempotent; rerun to resume."""
-        run_setup(jobs)
+        run_setup()

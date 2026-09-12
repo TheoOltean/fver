@@ -13,8 +13,6 @@ from rich.table import Table
 from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status
 from fver.prove.client import LLMClient, LLMSettings
-from fver.prove.loop import Verifier
-from fver.prove.pricing import estimate_attempt_usd
 from fver.util.log import console
 
 
@@ -109,51 +107,6 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
     for fn in selected:
         visit(fn, set())
     return ordered
-
-
-def _print_plan(
-    ctx: AppContext,
-    selected: list[FunctionInfo],
-    settings: LLMSettings,
-    budget_run: float,
-    recheck: bool,
-) -> None:
-    from fver.prove import store
-
-    class _NoLLM:
-        def complete(self, *a, **k):  # pragma: no cover
-            raise RuntimeError("dry run")
-
-    v = Verifier(ctx, _NoLLM(), run_id="dry-run")
-    per_attempt = estimate_attempt_usd(settings.model)
-    avg_attempts = max(1, min(3, ctx.config.budget.max_attempts_per_function))
-    table = Table(title="verify plan (dry run)")
-    table.add_column("function")
-    table.add_column("file")
-    table.add_column("score", justify="right")
-    table.add_column("callees w/ contract", justify="right")
-    table.add_column("cache")
-    hits = 0
-    for fn in selected:
-        task = v.build_task(fn)
-        key = v.cache_key_for(task)
-        hit = store.cache_lookup(ctx.ws, key) is not None
-        hits += hit
-        table.add_row(
-            fn.name,
-            fn.source_path,
-            f"{fn.attack_score:.2f}",
-            f"{len(task.callee_specs)}/{len(fn.callees)}",
-            "hit" if hit else "-",
-        )
-    console.print(table)
-    n_llm = len(selected) - hits
-    est = 0.0 if recheck else n_llm * per_attempt * avg_attempts
-    console.print(
-        f"{len(selected)} function(s), {hits} cache hit(s). Estimated LLM cost "
-        f"~${est:.2f} at ~${per_attempt:.2f}/attempt x ~{avg_attempts} attempts "
-        f"(run cap ${budget_run:.2f})."
-    )
 
 
 def _print_summary(counts: dict[Status, int], cache_hits: int, usd: float) -> None:

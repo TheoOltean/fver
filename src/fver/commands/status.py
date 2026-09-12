@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import sys
-from dataclasses import asdict
 
 import typer
 from rich.panel import Panel
@@ -13,8 +11,7 @@ from rich.table import Table
 from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status
 from fver.core.workspace import Workspace
-from fver.ledger.report import build_report, to_markdown
-from fver.util.log import console, err_console
+from fver.util.log import console, err_console, setup_logging
 
 STATUS_STYLE = {
     Status.VERIFIED.value: "green",
@@ -34,43 +31,32 @@ def styled_status(status: str) -> str:
 def register(app: typer.Typer) -> None:
     @app.command("status")
     def status(
-        function: str | None = typer.Option(
-            None, "--function", "-f", help="Open on (or, off a terminal, print) one function."
-        ),
-        limit: int = typer.Option(20, "--limit", "-n", help="Functions to list (by attack score)."),
-        as_json: bool = typer.Option(False, "--json", help="Print the summary as JSON."),
-        plain: bool = typer.Option(False, "--plain", help="Print a table instead of the view."),
-        markdown: bool = typer.Option(
-            False, "--markdown", help="Print the full report as markdown (for CI or sharing)."
+        function: str | None = typer.Argument(
+            None, help="Open on (or, off a terminal, print) one function.", show_default=False
         ),
     ) -> None:
-        """What is proven, what is not, and why: a browsable view on a terminal, a table otherwise."""
-        if not as_json and not plain and not markdown and sys.stdout.isatty():
+        """What is proven, what is not, and why. Indexes the code first if needed. A browsable view on a terminal, a table otherwise."""
+        from fver.commands.prove import refresh_index
+
+        ctx = AppContext.load(need_backend=True)
+        setup_logging(ctx.ws.logs_dir, run_name="status")
+        try:
+            refresh_index(ctx)
+        finally:
+            ctx.close()
+        if sys.stdout.isatty():
             from fver.tui import run_status
 
-            ws = Workspace.open()
-            run_status(ws.repo_root, select=function)
+            run_status(Workspace.open().repo_root, select=function)
             return
         if function:
-            _show(function, None, as_json)
-            return
-        if markdown:
-            ctx = AppContext.load(need_backend=False)
-            try:
-                typer.echo(
-                    to_markdown(build_report(ctx.ledger, ctx.backend_name, ctx.target.key, ctx.ws))
-                )
-            finally:
-                ctx.close()
+            _show(function)
             return
         ctx = AppContext.load(need_backend=False)
         try:
             backend = ctx.backend_name
             target_key = ctx.target.key
             summary = ctx.ledger.summary(backend, target_key)
-            if as_json:
-                typer.echo(json.dumps(asdict(summary), indent=2, sort_keys=True))
-                return
             c = summary.total_cost
             lines = [
                 f"[bold]{ctx.ws.project_name}[/]  backend=[cyan]{backend}[/]  target=[cyan]{ctx.target.triple}[/]",
@@ -93,9 +79,9 @@ def register(app: typer.Typer) -> None:
             ]
             console.print(Panel("\n".join(lines), title="fver status", expand=False))
 
-            rows = ctx.ledger.list_functions(backend, target_key, limit=limit)
+            rows = ctx.ledger.list_functions(backend, target_key, limit=20)
             if not rows:
-                console.print("No functions indexed yet. Run [bold]fver scan[/].")
+                console.print("No functions found.")
                 return
             table = Table(title=f"Top {len(rows)} functions by attack score")
             table.add_column("Function", style="bold")
@@ -134,25 +120,10 @@ def _resolve(ctx: AppContext, ident: str, file: str | None) -> FunctionInfo | No
     return matches[0]
 
 
-def _show(ident: str, file: str | None, as_json: bool) -> None:
+def _show(ident: str, file: str | None = None) -> None:
     if True:
         ctx = AppContext.load(need_backend=False)
         try:
-            if as_json:
-                import json
-
-                from fver.prove import protocol
-
-                try:
-                    typer.echo(
-                        json.dumps(
-                            protocol.show(ctx, ident, file), indent=2, sort_keys=True, default=str
-                        )
-                    )
-                except protocol.ProtocolError as e:
-                    err_console.print(f"[red]{e}[/]")
-                    raise typer.Exit(code=1) from None
-                return
             fn = _resolve(ctx, ident, file)
             if fn is None:
                 raise typer.Exit(code=1)

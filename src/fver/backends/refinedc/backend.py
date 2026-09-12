@@ -51,6 +51,7 @@ from fver.backends.refinedc.parse_output import (
 )
 from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit, sha256_text
 from fver.index.functions import extract_from_source
+from fver.util import platform as plat
 from fver.util.proc import run, version_of, which
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -124,9 +125,10 @@ class RefinedCBackend:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.settings = dict(settings or {})
         self.target = target
-        self.refinedc_bin: str = self.settings.get("refinedc_bin", facts.REFINEDC_BIN)
-        self.coqc_bin: str = self.settings.get("coqc_bin", facts.COQC_BIN)
-        self.dune_bin: str = self.settings.get("dune_bin", facts.DUNE_BIN)
+        # The opam switch `fver setup` creates, unless the config points elsewhere.
+        self.refinedc_bin: str = self.settings.get("refinedc_bin") or plat.tool(facts.REFINEDC_BIN)
+        self.coqc_bin: str = self.settings.get("coqc_bin") or plat.tool(facts.COQC_BIN)
+        self.dune_bin: str = self.settings.get("dune_bin") or plat.tool(facts.DUNE_BIN)
         self.coq_root: str = self.settings.get("coq_root", facts.DEFAULT_COQ_ROOT)
         self.include_dirs: list[str] = list(self.settings.get("include_dirs", []))
         self.defines: list[str] = list(self.settings.get("defines", []))

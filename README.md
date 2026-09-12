@@ -49,14 +49,11 @@ FVER_REFINEDC_BIN=~/.opam/fver/bin/refinedc .venv/bin/python -m pytest -q tests/
 To pin a release instead of `main`, set `FVER_REF` (a tag or commit) before
 piping to `sh`, e.g. `FVER_REF=v0.1.0`. To upgrade, run the one-liner again.
 
-Credentials and model: fver calls the Anthropic API. Put the key in your
-user-level config, `~/.fver/config.toml` (never committed), and pick the
-model there too:
+Credentials: fver calls the Anthropic API. After `fver init`, put the key in
+the project's `.fver/config.toml`, which git ignores:
 
 ```sh
-fver config set --user model.api_key sk-ant-...
-fver config set --user model.model claude-fable-5-1     # default
-fver config set --user model.effort high                # low | medium | high | xhigh | max
+fver config set model.api_key sk-ant-...
 ```
 
 Alternatively export `ANTHROPIC_API_KEY`, or run `ant auth login` once and
@@ -67,10 +64,11 @@ the SDK will pick up the profile. `fver setup` shows which source is used.
 ```sh
 cd your-c-repo
 fver init                  # once: .fver/ with a short commented config and GUIDE.md
+fver status                # index the code; what is provable, proven, and why not
 fver prove                 # the whole repository, highest attack surface first, under the budget
 fver prove src/lzio.c      # one file
 fver prove luaZ_fill       # one function (its unproven callees come first)
-fver status                # what is proven, what is not, and why
+fver status luaZ_fill      # one function: contract, attempts, cost, who depends on it
 ```
 
 `fver prove` does everything in order: it indexes the code if it has never
@@ -79,25 +77,23 @@ function with a concrete bug is recorded instead of sent to the prover, then
 proves the rest in dependency order. On a terminal it shows a live view: a
 tree of directories, files and functions coloured by status, details of the
 selected function on the right, coverage and cost at the bottom. Off a
-terminal (CI, a pipe) it prints one line per function; `--plain` forces that.
-`--dry-run` lists what a run would touch and what it might cost.
+terminal (CI, a pipe) it prints one line per function.
 
-`fver status` opens the same view read-only. `fver status --plain` prints a
-table, `fver status -f NAME` details one function, `fver status --markdown`
-and `--json` print the full report for CI or sharing.
+`fver status` opens the same view read-only, indexing the code first if
+needed; off a terminal it prints a table, or one function's details when
+given a name.
 
-The config is `.fver/config.toml`: the model, its effort, and the budget per
-run and per function, each with a comment. `fver config set <key> <value>`
-changes a setting; `fver config show` prints all of them with their effective
-values, and `.fver/GUIDE.md` documents every one. The API key goes in
-`~/.fver/config.toml` via `fver config set --user model.api_key ...`, never
-in the repository.
+The one config is `.fver/config.toml`, ignored by git: the API key, the
+model, its effort, and the budget per run and per function, each with a
+comment. `fver config set <key> <value>` changes a setting, `fver config`
+prints all of them with their effective values, and `.fver/GUIDE.md`
+documents every one. Everything else has a default.
 
 ## Two ways to run the prover
 
 **API mode.** `fver prove` calls the Anthropic API itself: fully
 autonomous, parallel, budgeted per function and per run, results cached.
-Needs a key in your user-level config. Best for sweeping a whole codebase.
+Needs the API key in the config. Best for sweeping a whole codebase.
 
 **Session mode.** A Claude Code session (or any MCP client, or a script,
 or you) acts as the prover. fver keeps the parts that must not be left to
@@ -106,7 +102,7 @@ audit and the ledger. No API key; the cost is your Claude subscription;
 it is interactive and works while you edit code. Best for day-to-day
 development and for functions the autonomous loop could not close.
 
-Both modes record into the same ledger; `fver status -f <fn>` says which prover
+Both modes record into the same ledger; `fver status <fn>` says which prover
 produced a proof.
 
 ## Use from Claude Code
@@ -190,7 +186,7 @@ only what changed.
 ```sh
 fver init --backend null
 echo '["```c file=function.c\n/* FVER_ACCEPT */\nint f(void){return 0;}\n```"]' > .fver/fake.json
-FVER_FAKE_LLM=.fver/fake.json fver prove --plain
+FVER_FAKE_LLM=.fver/fake.json fver prove
 ```
 
 The `null` backend accepts any submission containing `FVER_ACCEPT`; the
@@ -231,7 +227,7 @@ definition. `fver status` reports every one of these per function.
 ## Layout of `.fver/`
 
 ```
-config.toml      configuration (commit this)
+config.toml      configuration, including the API key (ignored)
 ledger.sqlite    what is proven, by whom, at what cost (commit this)
 proofs/          accepted submissions mirroring your source tree (commit this)
 external/        trusted specs for external functions (commit this)

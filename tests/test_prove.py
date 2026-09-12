@@ -25,7 +25,6 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     (root / "src").mkdir(parents=True)
     (root / "src" / "m.c").write_text(SRC)
     monkeypatch.chdir(root)
-    monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
     r = CliRunner().invoke(app, ["init", "--backend", "null"])
     assert r.exit_code == 0, r.output
     return root
@@ -65,7 +64,7 @@ def fake_cbmc(monkeypatch):
 
 
 def test_split_and_select_targets(repo: Path) -> None:
-    CliRunner().invoke(app, ["prove", "--dry-run"])
+    CliRunner().invoke(app, ["status"])  # indexes
     ctx = AppContext.load(repo, need_backend=True)
     try:
         assert prove.split_targets(ctx, []) == ([], [])
@@ -108,10 +107,10 @@ def test_prove_indexes_hunts_then_proves(repo: Path, monkeypatch, fake_cbmc) -> 
     assert r.exit_code == 0 and "Nothing to prove" in r.output and "Indexing" not in r.output
 
 
-def test_prove_targets_and_dry_run(repo: Path, monkeypatch, fake_cbmc) -> None:
-    r = CliRunner().invoke(app, ["prove", "--dry-run", "add"])
+def test_prove_targets(repo: Path, monkeypatch, fake_cbmc) -> None:
+    r = CliRunner().invoke(app, ["status"])
     assert r.exit_code == 0, r.output
-    assert "add" in r.output and fake_cbmc.calls == []  # dry run: no hunting, no proving
+    assert "Indexing" in r.output and "add" in r.output and fake_cbmc.calls == []
     _scripted(repo, monkeypatch, "int add(int a, int b) { return a + b; }")
     r = CliRunner().invoke(app, ["prove", "add"])
     assert r.exit_code == 0, r.output

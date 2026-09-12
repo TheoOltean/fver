@@ -19,7 +19,7 @@ from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status
 from fver.prove.client import FatalAgentError, LLMSettings
 from fver.prove.loop import FunctionOutcome, Verifier
-from fver.prove.select import _make_llm, _print_plan, _print_summary, _select
+from fver.prove.select import _make_llm, _print_summary, _select
 from fver.util.log import console, setup_logging
 
 
@@ -105,18 +105,13 @@ def run_prove(
     ctx: AppContext,
     targets: list[str],
     *,
-    dry_run: bool = False,
-    max_usd: float | None = None,
-    limit: int | None = None,
-    jobs: int | None = None,
     on_done: Callable[[FunctionInfo, FunctionOutcome], None] | None = None,
 ) -> int:
     """The pipeline. Returns the process exit code."""
     cfg = ctx.config
     assert ctx.backend is not None
     refresh_index(ctx)
-    limit = limit if limit is not None else (cfg.budget.max_functions_per_run or None)
-    selected = select_functions(ctx, targets, limit)
+    selected = select_functions(ctx, targets, cfg.budget.max_functions_per_run or None)
     if not selected:
         console.print(
             "[yellow]Nothing to prove:[/] no matching functions are waiting. "
@@ -132,11 +127,8 @@ def run_prove(
         prompt_caching=cfg.model.prompt_caching,
         timeout_seconds=cfg.model.timeout_seconds,
     )
-    budget_run = max_usd if max_usd is not None else cfg.budget.max_usd_per_run
-    parallelism = jobs if jobs is not None else cfg.budget.parallelism
-    if dry_run:
-        _print_plan(ctx, selected, settings, budget_run, False)
-        return 0
+    budget_run = cfg.budget.max_usd_per_run
+    parallelism = cfg.budget.parallelism
 
     selected = hunt_first(ctx, selected, whole_repo=not targets)
     if not selected:
@@ -204,35 +196,14 @@ def register(app: typer.Typer) -> None:
             help="Nothing for the whole repository, or files, functions and globs of either.",
             show_default=False,
         ),  # noqa: B008
-        dry_run: bool = typer.Option(
-            False, "--dry-run", help="Show what would be proven and the cost estimate; do nothing."
-        ),
-        max_usd: float | None = typer.Option(
-            None, "--max-usd", help="Budget for this run (config: budget.max_usd_per_run)."
-        ),
-        limit: int | None = typer.Option(
-            None,
-            "--limit",
-            "-n",
-            help="Stop after this many functions (config: budget.max_functions_per_run).",
-        ),
-        jobs: int | None = typer.Option(
-            None, "--jobs", "-j", help="Functions proven concurrently (config: budget.parallelism)."
-        ),
-        plain: bool = typer.Option(
-            False, "--plain", help="One line per function instead of the live view."
-        ),
-        verbose: bool = typer.Option(False, "--verbose", "-v"),
     ) -> None:
-        """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order. Shows the live view on a terminal."""
+        """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order. Live view on a terminal, one line per function otherwise."""
         ctx = AppContext.load(need_backend=True)
-        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name="prove")
+        setup_logging(ctx.ws.logs_dir, run_name="prove")
         tgts = list(targets or [])
-        if plain or dry_run or not sys.stdout.isatty():
+        if not sys.stdout.isatty():
             try:
-                code = run_prove(
-                    ctx, tgts, dry_run=dry_run, max_usd=max_usd, limit=limit, jobs=jobs
-                )
+                code = run_prove(ctx, tgts)
             finally:
                 ctx.close()
             raise typer.Exit(code)
@@ -244,9 +215,7 @@ def register(app: typer.Typer) -> None:
             wctx = AppContext.load(repo_root, need_backend=True)
             try:
                 with console.capture():  # the live view replaces the line output
-                    return run_prove(
-                        wctx, tgts, max_usd=max_usd, limit=limit, jobs=jobs, on_done=on_done
-                    )
+                    return run_prove(wctx, tgts, on_done=on_done)
             finally:
                 wctx.close()
 

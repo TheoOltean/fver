@@ -43,8 +43,8 @@ def credential_status(config_key: str | None = None) -> ToolStatus:
         "anthropic credentials",
         False,
         required=False,  # informational: session mode needs none
-        hint="API mode only: `fver config set --user model.api_key ...`, "
-        "ANTHROPIC_API_KEY, or `ant auth login`. Session mode (Claude Code) needs none.",
+        hint="API mode only: model.api_key in .fver/config.toml, ANTHROPIC_API_KEY, "
+        "or `ant auth login`. Session mode (Claude Code) needs none.",
     )
 
 
