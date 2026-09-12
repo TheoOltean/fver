@@ -169,6 +169,12 @@ def test_caller_waits_for_callee_and_is_blocked_without_its_contract(
         ctx.close()
     assert rows["add"][0] == "unresolved"
     assert rows["twice"] == ("unresolved", "blocked: no contract for callee add")
+    # A blocked function is selected again by a plain sweep; a failed one is not.
+    ctx = AppContext.load(repo, need_backend=True)
+    try:
+        assert [f.name for f in prove.select_functions(ctx, [], None)] == ["twice"]
+    finally:
+        ctx.close()
 
 
 def test_unsupported_propagates_to_callers_and_missing_contract_is_detected(

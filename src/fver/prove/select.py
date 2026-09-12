@@ -37,6 +37,16 @@ def _select(
     rows = []
     for st in statuses:
         rows.extend(ctx.ledger.list_functions(backend, tk, status=st, order_by_attack_score=True))
+    if Status.UNRESOLVED not in statuses:
+        # Blocked functions were never attempted: once their callee has a
+        # contract they are as good as waiting.
+        rows.extend(
+            r
+            for r in ctx.ledger.list_functions(
+                backend, tk, status=Status.UNRESOLVED, order_by_attack_score=True
+            )
+            if r.claim is not None and r.claim.message.startswith("blocked:")
+        )
     seen: set[str] = set()
     out: list[FunctionInfo] = []
     for row in rows:
@@ -76,11 +86,9 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
         (their callers are then blocked at no cost)."""
         if fn.id not in verified:
             claim = ctx.ledger.current_claim(fn.id, backend, tk)
-            verified[fn.id] = claim is not None and claim.status in (
-                Status.VERIFIED,
-                Status.UNSUPPORTED,
-                Status.UNRESOLVED,
-                Status.BUG_FOUND,
+            verified[fn.id] = claim is not None and (
+                claim.status in (Status.VERIFIED, Status.UNSUPPORTED, Status.BUG_FOUND)
+                or (claim.status is Status.UNRESOLVED and not claim.message.startswith("blocked:"))
             )
         return verified[fn.id]
 
