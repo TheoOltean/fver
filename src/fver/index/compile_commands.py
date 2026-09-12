@@ -167,7 +167,7 @@ def synthesise(repo_root: Path, build: BuildConfig, compiler: str) -> list[Trans
 
 
 def _bear_with_output(cmd: str, output: Path) -> str:
-    """`bear -- make` writes compile_commands.json into the cwd, i.e. the user's
+    """`bear -- make -B` writes compile_commands.json into the cwd, i.e. the user's
     repository. Redirect it into fver's own work directory unless the user
     already chose an output path."""
     stripped = cmd.lstrip()
@@ -224,17 +224,17 @@ def capture_build(
             if empty:
                 if kept is not None and kept.exists():
                     warnings.append(
-                        "the capture command compiled nothing (build already up to date); "
-                        f"reusing the previous capture at {kept}. Run the project's clean "
-                        "target (e.g. `make clean`) and scan again to refresh it."
+                        "the capture command compiled nothing; reusing the previous capture "
+                        f"at {kept}. If the build changed, make the capture command rebuild "
+                        "everything (Makefiles: `bear -- make -B`)."
                     )
                     path = kept
                     source = f"captured(previous):{kept}"
                 else:
                     warnings.append(
-                        "the capture command produced an empty compile_commands.json: the build "
-                        "was probably already up to date, so nothing was compiled. Run the "
-                        "project's clean target (e.g. `make clean`) and scan again."
+                        "the capture command produced an empty compile_commands.json: nothing "
+                        "was compiled. Make the capture command rebuild everything "
+                        "(Makefiles: `bear -- make -B`)."
                     )
                     path = None
             elif kept is not None and path == captured:

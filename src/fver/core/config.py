@@ -35,7 +35,7 @@ class ProjectConfig(BaseModel):
 class BuildConfig(BaseModel):
     # Path to an existing compile_commands.json, relative to repo root.
     compile_commands: str | None = None
-    # Or a shell command that produces one (run from repo root), e.g. "bear -- make".
+    # Or a shell command that produces one (run from repo root), e.g. "bear -- make -B".
     capture_command: str | None = None
     # Glob patterns (relative to repo root) selecting which sources to verify.
     include: list[str] = Field(default_factory=lambda: ["**/*.c"])
@@ -214,7 +214,7 @@ SECTION_COMMENTS = {
     ),
     "build": (
         "How fver learns each file's compiler flags. Normally nothing is needed: at scan\n"
-        "# time it uses compile_commands.json if present, `bear -- make` for Makefile\n"
+        "# time it uses compile_commands.json if present, `bear -- make -B` for Makefile\n"
         "# projects, and fallback_flags otherwise. include/exclude choose which sources count."
     ),
     "model": (

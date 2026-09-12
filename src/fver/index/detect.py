@@ -29,8 +29,10 @@ def detect_build(repo_root: Path) -> tuple[BuildConfig, list[str]]:
         build.compile_commands = "build/compile_commands.json"
         notes.append("build: Meson project; run `meson setup build` once before `fver scan`")
     elif any((repo_root / m).exists() for m in ("Makefile", "makefile", "GNUmakefile")):
-        build.capture_command = "bear -- make"
-        notes.append("build: Makefile project; `fver scan` captures the build with `bear -- make`")
+        # -B rebuilds every target whatever the timestamps say, so bear sees
+        # every compiler command even when the project is already built.
+        build.capture_command = "bear -- make -B"
+        notes.append("build: Makefile project; the first `fver prove` records a full rebuild")
     else:
         notes.append(
             "build: no build system found; every .c file is compiled with build.fallback_flags"
