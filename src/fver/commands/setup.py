@@ -16,6 +16,7 @@ installed binaries from the switch directly, so nothing is added to PATH.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -60,6 +61,8 @@ class Step:
     argv: list[str]
     skip_if: bool = False
     env: dict[str, str] = field(default_factory=dict)
+    # Print only output lines matching this pattern (the tool is chatty).
+    show_only: str | None = None
 
 
 def _opam_root_exists() -> bool:
@@ -132,6 +135,7 @@ def opam_steps(jobs: int) -> list[Step]:
         Step(
             "register the provers with Why3",
             [str(plat.switch_bin() / "why3"), "config", "detect"],
+            show_only=r"Found prover .*OK|Save config",
         ),
     ]
     return steps
@@ -141,7 +145,13 @@ def _run(step: Step) -> None:
     console.print(f"[bold]==>[/] {step.title}")
     console.print(f"    $ {' '.join(step.argv)}", style="dim")
     env = {**os.environ, **step.env}
-    r = subprocess.run(step.argv, env=env, check=False)
+    if step.show_only:
+        r = subprocess.run(step.argv, env=env, check=False, capture_output=True, text=True)
+        for line in (r.stdout + r.stderr).splitlines():
+            if re.search(step.show_only, line):
+                console.print("    " + line.strip())
+    else:
+        r = subprocess.run(step.argv, env=env, check=False)
     if r.returncode != 0:
         # `opam repo add` of an existing repository is the one benign failure.
         if step.argv[:3] == ["opam", "repo", "add"]:
