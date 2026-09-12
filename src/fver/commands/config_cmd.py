@@ -11,7 +11,14 @@ import tomli_w
 import typer
 from pydantic import ValidationError
 
-from fver.core.config import FverConfig, _diff, _drop_none, save_config, user_config_path
+from fver.core.config import (
+    FverConfig,
+    _diff,
+    _drop_none,
+    load_project_config,
+    save_config,
+    user_config_path,
+)
 from fver.core.workspace import Workspace
 from fver.util.log import console
 
@@ -115,7 +122,7 @@ def config_set(
             "[yellow]warning:[/] writing an API key into the project config, which is meant "
             "to be committed. Prefer `fver config set --user model.api_key ...`."
         )
-    new_cfg = set_value(ws.config, key, value)
+    new_cfg = set_value(load_project_config(ws.repo_root), key, value)
     save_config(ws.repo_root, new_cfg)
     typer.echo(f"{key} = {_render(get_value(new_cfg, key))}")
 

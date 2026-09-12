@@ -73,7 +73,7 @@ def test_capture_falls_back_to_synthesis(repo: Path) -> None:
     (repo / "compile_commands.json").unlink()
     cap = capture_build(repo, BuildConfig(fallback_flags=["-std=c99"]), compiler="cc")
     assert cap.source == "synthesised"
-    assert any("no compile_commands.json" in w for w in cap.warnings)
+    assert any("no build system found" in w for w in cap.warnings)
     assert sorted(t.source_path for t in cap.tus) == ["src/net/parser.c", "src/util.c"]
     assert cap.tus[0].arguments[:2] == ["cc", "-std=c99"]
 

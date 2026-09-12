@@ -12,6 +12,7 @@ backend untouched, so adding a backend never requires editing this file.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -146,6 +147,15 @@ def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def load_project_config(repo_root: Path) -> FverConfig:
+    """Only the project's own file, without the user-level layer. This is what
+    `fver config set` edits, so user settings (tool paths, credentials) never
+    get copied into a file that is meant to be committed."""
+    pp = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_NAME
+    data = tomllib.loads(pp.read_text(encoding="utf-8", errors="replace")) if pp.exists() else {}
+    return FverConfig.model_validate(data)
+
+
 def load_config(repo_root: Path) -> FverConfig:
     """Load user defaults then the project config on top."""
     data: dict[str, Any] = {}
@@ -185,19 +195,63 @@ def _diff(defaults: Any, current: Any) -> Any:
     return current
 
 
+CONFIG_HEADER = """\
+# fver project configuration. Only settings that differ from the defaults are
+# written here; `fver config show` prints every setting with its effective
+# value and `fver config set <key> <value>` changes one. .fver/GUIDE.md
+# documents all of them.
+"""
+
+SECTION_COMMENTS = {
+    "project": "This project. The proof stack is RefinedC on Rocq; there is nothing to choose.",
+    "target": (
+        "The machine the proofs are for, detected from your C compiler. Proofs depend on\n"
+        "# integer widths, pointer size and char signedness, so they are recorded with every\n"
+        "# result. Change these only to verify for a different platform."
+    ),
+    "build": (
+        "How fver learns each file's compiler flags. Normally nothing is needed: at scan\n"
+        "# time it uses compile_commands.json if present, `bear -- make` for Makefile\n"
+        "# projects, and fallback_flags otherwise. include/exclude choose which sources count."
+    ),
+    "model": (
+        "Which Claude model proves, and how hard it thinks. The API key belongs in\n"
+        "# ~/.fver/config.toml (`fver config set --user model.api_key ...`), never here."
+    ),
+    "budget": "Money and attempt caps, per function and per run.",
+    "verify": "Defaults for `fver verify`, `fver next` and `fver task`; flags override for one run.",
+    "hunters": "Bug finders. CBMC always runs; set test_command to also run your tests under sanitizers.",
+    "backend": "Proof-checker settings: tool paths (`fver setup` records them in ~/.fver), extra includes.",
+}
+
+
+def _with_comments(toml: str) -> str:
+    out: list[str] = [CONFIG_HEADER.rstrip("\n")]
+    for line in toml.splitlines():
+        m = re.match(r"^\[([a-z_]+)", line)
+        if m and m.group(1) in SECTION_COMMENTS:
+            if out and out[-1].strip():
+                out.append("")
+            out.append(f"# {SECTION_COMMENTS[m.group(1)]}")
+        out.append(line)
+    return "\n".join(out).rstrip() + "\n"
+
+
 def dumps_config(cfg: FverConfig, minimal: bool = True) -> str:
     """Serialise a config. `minimal` writes only values that differ from the
     defaults, so a project file never shadows user-level settings such as the
-    model or API key with copies of the defaults. `fver config show` prints the
-    effective, fully merged configuration."""
+    model or API key with copies of the defaults, and adds explanatory
+    comments. `fver config show` prints the effective, fully merged
+    configuration without comments."""
     data = cfg.model_dump(mode="json")
-    if minimal:
-        data = _diff(FverConfig().model_dump(mode="json"), data)
-        # Always keep the project section so the file is self-describing.
-        data.setdefault("project", {})
-        data["project"].setdefault("name", cfg.project.name)
-        data["project"].setdefault("backend", cfg.project.backend)
-    return tomli_w.dumps(_drop_none(data))
+    if not minimal:
+        return tomli_w.dumps(_drop_none(data))
+    data = _diff(FverConfig().model_dump(mode="json"), data)
+    # Always keep the project name so the file is self-describing. The backend
+    # is only written when it is not the stack (the null backend, for tests).
+    data.setdefault("project", {})
+    data["project"].setdefault("name", cfg.project.name)
+    return _with_comments(tomli_w.dumps(_drop_none(data)))
 
 
 def save_config(repo_root: Path, cfg: FverConfig) -> Path:

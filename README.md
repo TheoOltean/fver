@@ -66,7 +66,7 @@ the SDK will pick up the profile. `fver doctor` shows which source is used.
 
 ```sh
 cd your-c-repo
-fver init          # creates .fver/config.toml; detects your build system and target
+fver init          # creates .fver/: a short commented config.toml and GUIDE.md; detects the target
 fver doctor        # every tool present? credentials set?
 fver scan          # capture the build, index every function, run the backend front-end
 fver hunt          # CBMC (and the sanitizers over your tests, if hunters.test_command is set)
@@ -75,6 +75,12 @@ fver status        # what is proven
 fver show parse_header
 fver report        # full markdown report under .fver/reports/
 ```
+
+The proof stack is fixed: RefinedC on Rocq. `fver init` writes a short,
+commented `.fver/config.toml` holding only the project name and the detected
+target ABI. How the project builds is worked out at scan time
+(`compile_commands.json` if present, `bear -- make` for Makefiles, fallback
+flags otherwise) and never needs configuring for ordinary projects.
 
 Everything that shapes a run lives in `.fver/config.toml`: which functions a
 run may take on (`[verify]`: `limit`, `retry_unresolved`, `follow_callees`,

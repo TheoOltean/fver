@@ -185,8 +185,13 @@ def capture_build(
     """The full policy: configured path, then discovery, then capture command,
     then synthesis. `work_dir` (normally <repo>/.fver/work) receives anything
     the capture command produces so the user's tree stays untouched."""
+    from fver.build.detect import resolve_build
+
     repo_root = repo_root.resolve()
     warnings: list[str] = []
+    build, notes = resolve_build(repo_root, build)
+    for n in notes:
+        log.info(n)
     path = find_compile_commands(repo_root, build.compile_commands)
     source = "config" if (path and build.compile_commands) else (f"found:{path}" if path else "")
 
@@ -247,9 +252,9 @@ def capture_build(
         return BuildCapture(tus=tus, source=source, warnings=warnings)
 
     warnings.append(
-        "no compile_commands.json found; compiling every included .c file with "
-        f"fallback flags {build.fallback_flags}. Set build.compile_commands or "
-        "build.capture_command (e.g. 'bear -- make') for exact flags."
+        "no build system found; compiling every included .c file with "
+        f"fallback flags {build.fallback_flags}. If the project does build some other way, "
+        "set build.capture_command (e.g. 'bear -- make') or build.compile_commands."
     )
     return BuildCapture(
         tus=synthesise(repo_root, build, compiler), source="synthesised", warnings=warnings

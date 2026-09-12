@@ -7,11 +7,11 @@ from pathlib import Path
 import typer
 from rich.panel import Panel
 
+from fver.build.detect import detect_build
 from fver.commands.docs import render_docs
 from fver.core.config import (
     CONFIG_DIR_NAME,
     CONFIG_FILE_NAME,
-    BuildConfig,
     FverConfig,
     ProjectConfig,
     TargetConfig,
@@ -19,38 +19,6 @@ from fver.core.config import (
 )
 from fver.core.workspace import Workspace
 from fver.util.log import console
-
-
-def detect_build(repo_root: Path) -> tuple[BuildConfig, list[str]]:
-    """Guess build settings from files in the repo. Returns (config, notes)."""
-    notes: list[str] = []
-    build = BuildConfig()
-    for cand in ("compile_commands.json", "build/compile_commands.json"):
-        if (repo_root / cand).exists():
-            build.compile_commands = cand
-            notes.append(f"found {cand}; will use it")
-            return build, notes
-    if (repo_root / "CMakeLists.txt").exists():
-        build.compile_commands = "build/compile_commands.json"
-        notes.append(
-            "CMake project: run `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build` to produce "
-            "build/compile_commands.json before `fver scan`"
-        )
-    elif (repo_root / "meson.build").exists():
-        build.compile_commands = "build/compile_commands.json"
-        notes.append(
-            "Meson project: run `meson setup build` to produce build/compile_commands.json"
-        )
-    elif any((repo_root / m).exists() for m in ("Makefile", "makefile", "GNUmakefile")):
-        build.capture_command = "bear -- make"
-        notes.append(
-            "Makefile project: `fver scan` will run `bear -- make` to capture the build"
-        )
-    else:
-        notes.append(
-            "no build system detected; every included .c file will be compiled with build.fallback_flags"
-        )
-    return build, notes
 
 
 def detect_target_config() -> TargetConfig:
@@ -83,10 +51,9 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
     if cfg_path.exists() and not force:
         console.print(f"[yellow]{cfg_path} already exists.[/] Use --force to overwrite the config.")
         raise typer.Exit(code=1)
-    build, notes = detect_build(repo_root)
+    _build, notes = detect_build(repo_root)  # shown to the user; scan re-detects, nothing stored
     cfg = FverConfig(
         project=ProjectConfig(name=name or repo_root.name, backend=backend),
-        build=build,
         target=detect_target_config(),
     )
     ws = Workspace.create(repo_root, cfg)
@@ -95,13 +62,14 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
     # command and option, every config key, the proving workflow.
     (ws.root / "GUIDE.md").write_text(render_docs(), encoding="utf-8")
     console.print(Panel.fit(f"Initialised [bold]{ws.root}[/]", title="fver init"))
+    console.print(f"  • proof stack: RefinedC on Rocq (target {cfg.target.triple})")
     for n in notes:
         console.print(f"  • {n}")
+    console.print("  • settings: .fver/config.toml (commented); everything else: .fver/GUIDE.md")
     console.print(
         "\nNext steps:\n"
-        "  fver doctor   check tools and credentials\n"
         "  fver scan     capture the build and index functions\n"
-        "  fver hunt     run bug finders\n"
+        "  fver hunt     run the bug finders\n"
         "  fver verify   start proving"
     )
     return cfg_path

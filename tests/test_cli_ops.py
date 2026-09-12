@@ -44,7 +44,12 @@ def test_init_creates_layout_and_detects_makefile(repo):
         assert needle in readme
     cfg = load_config(repo)
     assert cfg.project.name == "proj" and cfg.project.backend == "refinedc"
-    assert cfg.build.capture_command == "bear -- make"
+    # Nothing about the build is stored; scan detects it. The file is commented.
+    assert cfg.build.capture_command is None and cfg.build.compile_commands is None
+    text = (ws.root / "config.toml").read_text()
+    assert text.startswith("# fver project configuration") and "[build]" not in text
+    assert 'backend = "refinedc"' not in text and "# The machine the proofs are for" in text
+    assert "Makefile project" in r.output
     # user tree untouched apart from .fver
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]
 
@@ -65,11 +70,19 @@ def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch)
     (d / "CMakeLists.txt").write_text("project(x C)")
     monkeypatch.chdir(d)
     monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
-    assert runner.invoke(app, ["init"]).exit_code == 0
-    assert load_config(d).build.compile_commands == "build/compile_commands.json"
+    from fver.build.detect import detect_build, resolve_build
+    from fver.core.config import BuildConfig
+
+    r = runner.invoke(app, ["init"])
+    assert r.exit_code == 0 and "CMake project" in r.output
+    assert detect_build(d)[0].compile_commands == "build/compile_commands.json"
     (d / "compile_commands.json").write_text("[]")
-    assert runner.invoke(app, ["init", "--force"]).exit_code == 0
-    assert load_config(d).build.compile_commands == "compile_commands.json"
+    assert detect_build(d)[0].compile_commands == "compile_commands.json"
+    # A configured source of flags wins over detection; include/exclude survive a detection.
+    chosen = BuildConfig(capture_command="bear -- ninja", include=["lib/**/*.c"])
+    assert resolve_build(d, chosen)[0] == chosen
+    auto, _ = resolve_build(d, BuildConfig(include=["lib/**/*.c"]))
+    assert auto.compile_commands == "compile_commands.json" and auto.include == ["lib/**/*.c"]
 
 
 # --- config -------------------------------------------------------------
@@ -109,6 +122,25 @@ def test_config_get_set_roundtrip(repo):
     assert runner.invoke(app, ["config", "get", "nope.key"]).exit_code == 1
     assert str(repo / ".fver" / "config.toml") in runner.invoke(app, ["config", "path"]).output
     assert "[project]" in runner.invoke(app, ["config", "show"]).output
+
+
+def test_config_set_never_copies_user_settings_into_the_project(repo):
+    runner.invoke(app, ["init"])
+    assert (
+        runner.invoke(app, ["config", "set", "--user", "model.api_key", "sk-secret"]).exit_code == 0
+    )
+    assert (
+        runner.invoke(
+            app, ["config", "set", "--user", "backend.refinedc.refinedc_bin", "/opt/rc"]
+        ).exit_code
+        == 0
+    )
+    assert runner.invoke(app, ["config", "set", "budget.max_usd_per_run", "50"]).exit_code == 0
+    project = (repo / ".fver" / "config.toml").read_text()
+    assert "max_usd_per_run = 50" in project
+    assert "sk-secret" not in project and "/opt/rc" not in project
+    assert load_config(repo).model.api_key == "sk-secret"  # still effective through the merge
+    assert project.count("\n\n\n") == 0  # no double blank lines
 
 
 def test_docs_command_prints_and_refreshes_readme(repo):

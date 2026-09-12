@@ -13,7 +13,7 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | `core/config.py` | `.fver/config.toml` schema (pydantic), loading, saving. Run-shaping defaults live here (`[verify]`, `[budget]`, `[model]`, `[hunters]`); CLI flags are one-run overrides and default to None so the config wins | no (opaque `[backend.<name>]` table) |
 | `core/workspace.py` | `.fver/` layout, write guard (refuses to write outside `.fver/`) | no |
 | `core/context.py` | `AppContext.load()` = workspace + config + ledger + backend | constructs it via registry only |
-| `build/` | Build capture: compile_commands.json (bear/cmake/fallback), per-TU preprocessing, target detection | no |
+| `build/` | Build capture: `detect.py` infers the build at scan time (compile_commands.json, `bear -- make`, CMake/Meson export dirs, fallback flags) unless `[build]` names a source of flags; per-TU preprocessing; target detection | no |
 | `extract/` | Function extraction (tree-sitter), call graph, attack-surface ranking | no |
 | `ledger/api.py` | `Ledger` protocol; `ledger/sqlite.py` implements it; `ledger/cache.py` cache keys; `ledger/report.py` | no |
 | `backends/base.py` | The `Backend` protocol + Submission/CheckResult/FunctionTask/PromptContext | this IS the boundary |
