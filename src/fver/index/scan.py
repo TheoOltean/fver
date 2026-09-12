@@ -131,6 +131,21 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
                                     run_id=run_id,
                                 )
                             )
+            # A caller cannot be checked without its callee's contract, and an
+            # unsupported callee will never have one: the callers are unsupported too.
+            by_id = {f.id: f for f in functions}
+            changed = True
+            while changed:
+                changed = False
+                for f in functions:
+                    if f.id in unsupported:
+                        continue
+                    bad = [by_id[c].name for c in cg.edges.get(f.id, []) if c in unsupported]
+                    if bad:
+                        reason = f"calls {bad[0]}, which is unsupported"
+                        unsupported[f.id] = reason
+                        ledger.mark_unsupported(f.id, backend_name, ctx.target.key, reason, run_id)
+                        changed = True
             index["unsupported"] = unsupported
             index["tu_errors"] = tu_errors
         ws.write_state("index", index)

@@ -34,6 +34,9 @@ from fver.prove.retrieval import pick_examples
 
 log = logging.getLogger("fver.prove.loop")
 
+# RefinedC names a callee's contract type_of_<callee>; this is the error when none exists.
+MISSING_CONTRACT = re.compile(r"reference type_of_(\w+) was not found")
+
 HISTORY_KEEP = 3  # exchanges kept verbatim; older ones are summarised
 
 
@@ -559,6 +562,18 @@ class Verifier:
             # feedback: checker rejected the submission
             result = out.result
             assert result is not None
+            missing = MISSING_CONTRACT.findall(out.feedback or "")
+            if missing:
+                # No annotation can fix this: the checker has no contract for a
+                # function this one calls. Stop here instead of paying for retries.
+                names = ", ".join(sorted(set(missing)))
+                msg = (
+                    f"blocked: no contract for callee {names} (a library function needs a "
+                    f"trusted spec in .fver/external/<name>.c; a project function must be "
+                    "verified first)"
+                )
+                claim = self._claim(task, Status.UNRESOLVED, key, cost, msg)
+                return FunctionOutcome(claim, attempts=attempt)
             rank = {CheckOutcome.GOALS_REMAIN: 3, CheckOutcome.AUTOMATION_STUCK: 2}.get(
                 result.outcome, 1
             )
@@ -634,18 +649,21 @@ class Verifier:
         parallelism = max(1, parallelism)
         fatal: FatalAgentError | None = None
         selected = {fn.id: fn for fn in functions}
-        deps = {fn.id: self._selected_callees(fn, selected) for fn in functions}
+        deps = {fn.id: self._internal_callees(fn) for fn in functions}
         finished: set[str] = set()
 
-        def has_contract(fid: str) -> bool:
-            f = selected[fid]
+        def has_contract(f: FunctionInfo) -> bool:
             return store.load_accepted(self.ws, f.source_path, f.name) is not None
 
         def blocked_by(fn: FunctionInfo) -> list[str]:
-            return [selected[d].name for d in deps[fn.id] if d in finished and not has_contract(d)]
+            return [
+                c.name
+                for c in deps[fn.id]
+                if (c.id not in selected or c.id in finished) and not has_contract(c)
+            ]
 
         def ready(fn: FunctionInfo) -> bool:
-            return all(d in finished for d in deps[fn.id])
+            return all(c.id not in selected or c.id in finished for c in deps[fn.id])
 
         with ThreadPoolExecutor(max_workers=parallelism) as pool:
             pending: dict[Future, FunctionInfo] = {}
@@ -709,18 +727,19 @@ class Verifier:
             raise fatal
         return outcomes
 
-    def _selected_callees(self, fn: FunctionInfo, selected: dict[str, FunctionInfo]) -> set[str]:
-        """Ids of `fn`'s callees that are part of this run (same TU preferred,
-        else a non-static definition), excluding itself."""
-        out: set[str] = set()
+    def _internal_callees(self, fn: FunctionInfo) -> list[FunctionInfo]:
+        """The project functions `fn` calls (same TU preferred, else a
+        non-static definition), excluding itself. Names defined nowhere in
+        the project are library functions or macros and are not listed."""
+        out: list[FunctionInfo] = []
         for name in fn.callees:
             if name == fn.name:
                 continue
-            cands = [c for c in self.ledger.find_functions(name=name) if c.id in selected]
+            cands = self.ledger.find_functions(name=name)
             same_tu = [c for c in cands if c.tu_id == fn.tu_id]
-            pick = same_tu or [c for c in cands if not c.is_static] or []
+            pick = same_tu or [c for c in cands if not c.is_static]
             if pick:
-                out.add(pick[0].id)
+                out.append(pick[0])
         return out
 
 

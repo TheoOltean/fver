@@ -169,3 +169,19 @@ def test_caller_waits_for_callee_and_is_blocked_without_its_contract(
         ctx.close()
     assert rows["add"][0] == "unresolved"
     assert rows["twice"] == ("unresolved", "blocked: no contract for callee add")
+
+
+def test_unsupported_propagates_to_callers_and_missing_contract_is_detected(
+    repo: Path, monkeypatch
+) -> None:
+    (repo / "src" / "u.c").write_text(
+        "int unsupported_leaf(void) { return 1; }\nint caller(void) { return unsupported_leaf(); }\n"
+    )
+    r = CliRunner().invoke(app, ["status", "src/u.c"])
+    assert r.exit_code == 0, r.output
+    assert "calls unsupported_leaf, which is unsupported" in r.output.replace("\n", " ")
+    from fver.prove.loop import MISSING_CONTRACT
+
+    assert MISSING_CONTRACT.findall(
+        "Error: The reference type_of_memcpy was not found in the current environment."
+    ) == ["memcpy"]
