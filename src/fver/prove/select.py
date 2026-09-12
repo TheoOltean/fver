@@ -27,7 +27,9 @@ def _select(
 ) -> list[FunctionInfo]:
     backend = ctx.backend_name
     tk = ctx.target.key
-    statuses = [Status.NOT_ATTEMPTED, Status.STALE]
+    # IN_PROGRESS is what a run that died (API error, Ctrl-C) leaves behind;
+    # only one run works on a project at a time, so it is picked up again.
+    statuses = [Status.NOT_ATTEMPTED, Status.STALE, Status.IN_PROGRESS]
     if retry_unresolved:
         statuses.append(Status.UNRESOLVED)
     if recheck:
