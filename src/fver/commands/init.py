@@ -93,7 +93,7 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
     save_config(repo_root, cfg)
     # Documentation for whoever (or whatever) works here next: layout, every
     # command and option, every config key, the proving workflow.
-    (ws.root / "README.md").write_text(render_docs(), encoding="utf-8")
+    (ws.root / "GUIDE.md").write_text(render_docs(), encoding="utf-8")
     console.print(Panel.fit(f"Initialised [bold]{ws.root}[/]", title="fver init"))
     for n in notes:
         console.print(f"  • {n}")
@@ -110,7 +110,7 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
 def register(app: typer.Typer) -> None:
     @app.command("init")
     def init(
-        backend: str = typer.Option("refinedc", "--backend", "-b", help="Proof backend to use."),
+        backend: str = typer.Option("refinedc", "--backend", "-b", hidden=True),
         name: str | None = typer.Option(
             None, "--name", help="Project name (default: directory name)."
         ),

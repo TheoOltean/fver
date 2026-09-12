@@ -8,8 +8,8 @@ specifications: every function declared here is an external call and stays
 a trusted assumption in the ledger unless a spec is supplied under
 `.fver/external/`.
 
-They are added with `-I` after the project's own include directories, so a
-project that ships a real header of the same name wins.
+They are always added with `-I` after the project's own include directories,
+so a project that ships a real header of the same name wins.
 
 `setjmp.h` is special: Cerberus ships its own, which precedes every `-I`
 directory and ends in `#error`. The shim is therefore force-included

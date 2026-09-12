@@ -128,23 +128,22 @@ def truncate_lines(text: str, max_lines: int) -> str:
 
 def builtin_hunters() -> dict[str, type]:
     from fver.hunters.cbmc import CbmcHunter
-    from fver.hunters.cerberus import CerberusHunter
     from fver.hunters.sanitizers import SanitizerHunter
 
     return {
         CbmcHunter.name: CbmcHunter,
-        CerberusHunter.name: CerberusHunter,
         SanitizerHunter.name: SanitizerHunter,
     }
 
 
 def enabled_hunters(config: HuntersConfig, only: list[str] | None = None) -> list[Hunter]:
-    """Instantiate the hunters the config enables (optionally restricted to `only`)."""
+    """CBMC always runs; the sanitizer hunter runs when the project has a
+    test command to drive. `only` restricts to the named hunters."""
     table = builtin_hunters()
     names = [n for n in (only or table) if n in table]
     out: list[Hunter] = []
     for n in names:
-        if only is None and not getattr(config, n, False):
+        if n == "sanitizers" and only is None and not config.test_command:
             continue
         out.append(table[n]())
     return out

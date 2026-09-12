@@ -46,13 +46,7 @@ def _run(fn, need_backend: bool = True, **kwargs) -> str:
 
 
 def build_server() -> Any:
-    try:
-        from mcp.server.mcpserver import MCPServer
-    except ImportError as e:  # pragma: no cover - exercised by the CLI hint
-        raise ImportError(
-            "the MCP server needs the optional dependency: install fver with "
-            "`uv tool install 'fver[mcp]'` (or `pip install 'fver[mcp]'`)"
-        ) from e
+    from mcp.server.mcpserver import MCPServer
 
     server = MCPServer(
         name="fver",
@@ -115,7 +109,7 @@ def build_server() -> Any:
 
     @server.tool(name="fver_hunt")
     def fver_hunt(file: str | None = None) -> str:
-        """Run the bug finders (CBMC, Cerberus, sanitizers) over the indexed code, optionally one file. Concrete bugs become findings; slow on large repos."""
+        """Run the bug finders (CBMC, and the sanitizers when hunters.test_command is set) over the indexed code, optionally one file. Concrete bugs become findings; slow on large repos."""
         return _run(protocol.hunt, file=file, need_backend=False)
 
     return server

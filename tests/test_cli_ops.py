@@ -39,7 +39,7 @@ def test_init_creates_layout_and_detects_makefile(repo):
         assert (ws.root / d).is_dir()
     assert (ws.root / ".gitignore").exists()
     # The workspace README documents every command, every config key and the workflow.
-    readme = (ws.root / "README.md").read_text()
+    readme = (ws.root / "GUIDE.md").read_text()
     for needle in ("### `fver check`", "`--submission`", "[verify]", "next_limit", "## Goal"):
         assert needle in readme
     cfg = load_config(repo)
@@ -81,8 +81,8 @@ def test_config_get_set_roundtrip(repo):
     r = runner.invoke(app, ["config", "set", "model.effort", "xhigh"])
     assert r.exit_code == 0, r.output
     assert load_config(repo).model.effort == "xhigh"
-    assert runner.invoke(app, ["config", "set", "hunters.cbmc", "false"]).exit_code == 0
-    assert load_config(repo).hunters.cbmc is False
+    assert runner.invoke(app, ["config", "set", "hunters.cbmc_unwind", "12"]).exit_code == 0
+    assert load_config(repo).hunters.cbmc_unwind == 12
     assert runner.invoke(app, ["config", "set", "verify.limit", "5"]).exit_code == 0
     assert runner.invoke(app, ["config", "set", "verify.follow_callees", "false"]).exit_code == 0
     assert load_config(repo).verify.limit == 5 and load_config(repo).verify.follow_callees is False
@@ -115,14 +115,14 @@ def test_docs_command_prints_and_refreshes_readme(repo):
     assert runner.invoke(app, ["init"]).exit_code == 0
     r = runner.invoke(app, ["docs"])
     assert r.exit_code == 0 and "### `fver verify`" in r.output and "[budget]" in r.output
-    readme = repo / ".fver" / "README.md"
+    readme = repo / ".fver" / "GUIDE.md"
     readme.write_text("stale")
     r = runner.invoke(app, ["docs", "--write"])
     assert r.exit_code == 0 and readme.read_text() == docs_cmd.render_docs()
 
 
 def test_prover_workflow_matches_claude_skill():
-    """The skill shipped for Claude Code and the workflow written into .fver/README.md
+    """The skill shipped for Claude Code and the workflow written into .fver/GUIDE.md
     must say the same thing."""
     skill = pathlib.Path(__file__).resolve().parents[1] / ".claude" / "skills" / "fver" / "SKILL.md"
     if not skill.exists():
@@ -175,6 +175,8 @@ def test_doctor_exit_codes(repo, monkeypatch):
     monkeypatch.setattr(proc, "which", lambda n: None)
     r = runner.invoke(app, ["doctor"])
     assert r.exit_code == 1 and "missing" in r.output
+    assert "optional" not in r.output  # every tool is required; credentials are informational
+    assert "not set" in r.output
     monkeypatch.setattr(proc, "which", lambda n: f"/usr/bin/{n}")
     monkeypatch.setattr(
         proc, "run", lambda argv, **kw: proc.ProcResult(argv, 0, "tool 1.0\n", "", 0.0)
@@ -257,7 +259,7 @@ class FakeCtx:
         self.ws = ws
         self.ledger = ledger
         self.config = FverConfig()
-        self.config.hunters = HuntersConfig(cbmc=True, cerberus=False)
+        self.config.hunters = HuntersConfig()
         self.target = Target()
         self.backend_name = "null"
 

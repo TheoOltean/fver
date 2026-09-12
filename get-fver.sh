@@ -95,4 +95,12 @@ fi
 
 say ""
 say "Installed: $(fver --version)"
-say "Next: cd into a C repository and run 'fver init', then 'fver doctor'."
+# The toolchain (bear, cbmc, opam switch with Rocq + Iris + Cerberus + RefinedC)
+# is not optional. FVER_SKIP_SETUP=1 exists for CI of fver itself only.
+if [ "${FVER_SKIP_SETUP:-}" = 1 ]; then
+  say "FVER_SKIP_SETUP=1: not running 'fver setup'."
+else
+  say "Installing the toolchain with 'fver setup' (the first run builds Rocq and RefinedC: 20-40 min) ..."
+  fver setup
+fi
+say "Next: cd into a C repository and run 'fver init'."

@@ -5,11 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
-
-mcp = pytest.importorskip("mcp")
-
-from fver.mcp import server as srv  # noqa: E402
+from fver.mcp import server as srv
 
 EXPECTED = {
     "fver_reference",

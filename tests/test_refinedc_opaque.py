@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from fver.backends.base import FunctionTask, Submission
 from fver.backends.refinedc import backend as mod
 from fver.backends.refinedc import facts, opaque
@@ -115,8 +117,6 @@ def test_cpp_flags_put_shadow_dirs_before_project_dirs(tmp_path: Path):
     assert flags.index(f"-I{shadow / 'include'}") < flags.index(real_inc)
     assert flags.index(f"-I{shadow / 'include'}") < flags.index(real_src)  # all shadows first
     assert "-I/usr/local/include" in flags and not any("shadow/usr" in f for f in flags)
-    be.opaque_floats = False
-    assert not any(str(shadow) in f for f in be._cpp_flags(_tu(repo), repo))
 
 
 def test_check_argv_force_includes_setjmp_shim_and_opaque_header(tmp_path: Path):
@@ -128,9 +128,6 @@ def test_check_argv_force_includes_setjmp_shim_and_opaque_header(tmp_path: Path)
     assert f"--include={be.workspace_dir / opaque.OPAQUE_HEADER}" in argv
     assert "setjmp.h" in facts.SHIMMED_HEADERS and "setjmp.h" in facts.FORCE_INCLUDED_SHIMS
     assert "_SETJMP_H_" in (mod._SHIMS_DIR / "setjmp.h").read_text()  # Cerberus's own guard
-    be.opaque_floats = False
-    argv = be._check_argv(Path("x.c"), _tu(repo), repo, no_build=False)
-    assert not any(opaque.OPAQUE_HEADER in a for a in argv)
 
 
 SRC = '#include "lobj.h"\nint tv_is_int(TValue *o) { return o->tt_ == 3; }\ndouble half(double x) { return x / 2; }\n'
@@ -166,8 +163,11 @@ def test_translate_and_check_write_rewritten_copies(tmp_path: Path):
     (repo / "src" / "lobj.h").write_text(HEADER)
     (repo / "src" / "l.c").write_text(SRC)
     be = _backend(tmp_path)
-    res = be.translate(_tu(repo), [_task(be, repo).function], repo)
-    copy = Path(res.artifacts["copy"]).read_text()
+    from fver.backends.base import BackendToolMissing
+
+    with pytest.raises(BackendToolMissing):  # the copy and shadow are written before the tool runs
+        be.translate(_tu(repo), [_task(be, repo).function], repo)
+    copy = (be._tu_dir(_tu(repo)) / f"{be._stem_for('src/l.c')}.c").read_text()
     assert "struct fver_f64 half(struct fver_f64 x)" in copy and "double" not in copy
     assert (be.workspace_dir / opaque.OPAQUE_HEADER).exists()
     assert "typedef struct fver_f64 lua_Number;" in (be._shadow_root / "src" / "lobj.h").read_text()

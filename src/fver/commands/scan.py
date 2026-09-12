@@ -7,6 +7,7 @@ import logging
 import typer
 from rich.table import Table
 
+from fver.backends.base import BackendToolMissing
 from fver.core.models import Claim, PropertyClass, Status
 from fver.util.log import console, setup_logging
 
@@ -117,7 +118,10 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
             by_tu: dict[str, list] = {}
             for f in functions:
                 by_tu.setdefault(f.tu_id, []).append(f)
-            ctx.backend.prepare(tus, ws.repo_root)
+            try:
+                ctx.backend.prepare(tus, ws.repo_root)
+            except BackendToolMissing as e:
+                raise typer.BadParameter(str(e)) from None
             for tu in tus:
                 res = ctx.backend.translate(tu, by_tu.get(tu.id, []), ws.repo_root)
                 if res.tu_error:

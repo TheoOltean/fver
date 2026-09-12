@@ -1,4 +1,4 @@
-"""`fver docs`: the documentation that `fver init` writes to `.fver/README.md`.
+"""`fver docs`: the documentation that `fver init` writes to `.fver/GUIDE.md`.
 
 The file is meant to be read by whoever works in the repository next, human
 or model: the `.fver/` layout, every command with its options (generated
@@ -25,6 +25,7 @@ fver produces lives in this directory.
 | Path | What | Commit it? |
 |---|---|---|
 | `config.toml` | project configuration | yes |
+| `GUIDE.md` | this file: layout, commands, configuration, proving workflow | yes |
 | `ledger.sqlite` | what is proven, what is not, and why | yes (recommended) |
 | `proofs/` | accepted annotations and proofs, mirroring the source tree | yes |
 | `external/` | trusted specs for libc and other external functions | yes |
@@ -190,10 +191,10 @@ def register(app: typer.Typer) -> None:
     @app.command("docs")
     def docs(
         write: bool = typer.Option(
-            False, "--write", help="Refresh .fver/README.md instead of printing."
+            False, "--write", help="Refresh .fver/GUIDE.md instead of printing."
         ),
     ) -> None:
-        """Print the command, configuration and workflow reference (what `fver init` writes to .fver/README.md)."""
+        """Print the command, configuration and workflow reference (what `fver init` writes to .fver/GUIDE.md)."""
         text = render_docs()
         if not write:
             typer.echo(text)
@@ -201,6 +202,6 @@ def register(app: typer.Typer) -> None:
         from fver.core.workspace import Workspace
 
         ws = Workspace.open()
-        path = ws.root / "README.md"
+        path = ws.root / "GUIDE.md"
         path.write_text(text, encoding="utf-8")
         typer.echo(f"wrote {path}")

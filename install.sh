@@ -25,4 +25,10 @@ case ":$PATH:" in
     esac
     ;;
 esac
+if [ "${FVER_SKIP_SETUP:-}" = 1 ]; then
+  echo "FVER_SKIP_SETUP=1: not running 'fver setup'."
+else
+  echo "Installing the toolchain with 'fver setup' (first run: 20-40 min) ..."
+  "$BIN_DIR/fver" setup || fver setup
+fi
 echo "Installed. Run 'fver --help'."

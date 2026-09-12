@@ -9,14 +9,12 @@ Settings ([backend.refinedc] in config.toml), all optional:
   include_dirs        = []           extra -I directories (absolute or repo-relative)
   defines             = []           extra -D macros
   forward_build_flags = true         forward -I/-D from the captured build
-  posix_shims         = true         add Cerberus's posix/ headers and fver's shim
-                                     headers (-I, after the project's own) so files
-                                     that include <unistd.h>, <sys/types.h>, ... parse
-  opaque_floats       = true         check a copy in which float/double/long double
-                                     are same-size structs without arithmetic, so a
-                                     struct holding a double no longer rejects the
-                                     whole file (see opaque.py for why this is sound)
   allowed_axioms      = []           extra axiom names the audit tolerates
+
+Always on: Cerberus's posix/ headers and fver's shim headers (-I after the
+project's own directories, plus the force-included prelude and setjmp.h), and
+opaque floating point (see opaque.py). `fver setup` installs the toolchain;
+without it, scan and check stop with an error rather than guessing.
 
 The backend never writes outside its workspace directory
 (<repo>/.fver/backend/refinedc/); user sources are only read. Every path
@@ -38,6 +36,7 @@ from typing import Any
 
 from fver.backends.base import (
     AuditResult,
+    BackendToolMissing,
     CheckOutcome,
     CheckResult,
     FunctionTask,
@@ -55,19 +54,12 @@ from fver.backends.refinedc.parse_output import (
 )
 from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit, sha256_text
 from fver.extract.functions import extract_from_source
-from fver.util.platform import install_hint
 from fver.util.proc import run, version_of, which
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _SHIMS_DIR = Path(__file__).parent / facts.SHIMS_DIR_NAME
 
-INSTALL_HINT = (
-    "Install via opam (see RefinedC's README): `opam repo add coq-released "
-    "https://coq.inria.fr/opam/released && opam repo add iris-dev "
-    "https://gitlab.mpi-sws.org/iris/opam.git && opam update && opam pin add -n -y cerberus-lib "
-    "'git+https://github.com/rems-project/cerberus.git#f11e6b335a687c1b77539f7e5695607d09dfc3ea' "
-    "&& opam pin add refinedc git+https://gitlab.mpi-sws.org/iris/refinedc.git`"
-)
+INSTALL_HINT = "run `fver setup`"
 
 _TOOL_LOCK = threading.Lock()
 
@@ -143,8 +135,6 @@ class RefinedCBackend:
         self.include_dirs: list[str] = list(self.settings.get("include_dirs", []))
         self.defines: list[str] = list(self.settings.get("defines", []))
         self.forward_build_flags: bool = bool(self.settings.get("forward_build_flags", True))
-        self.posix_shims: bool = bool(self.settings.get("posix_shims", True))
-        self.opaque_floats: bool = bool(self.settings.get("opaque_floats", True))
         self.allowed_axioms = set(facts.ALLOWED_AXIOMS) | set(
             self.settings.get("allowed_axioms", [])
         )
@@ -175,20 +165,13 @@ class RefinedCBackend:
                 hint=hint,
             )
 
-        coq_hint = "Install Rocq via opam: `opam install rocq-prover` (RefinedC pulls it in)."
         rows = [
             status("refinedc", self.refinedc_bin, True, INSTALL_HINT),
-            status("coqc", self.coqc_bin, True, coq_hint),
-            status("dune", self.dune_bin, True, "`opam install dune`"),
-            status(
-                "opam",
-                facts.OPAM_BIN,
-                False,
-                install_hint("opam", url="https://opam.ocaml.org/doc/Install.html"),
-            ),
+            status("coqc", self.coqc_bin, True, INSTALL_HINT),
+            status("dune", self.dune_bin, True, INSTALL_HINT),
         ]
         if not rows[1].found and which(facts.ROCQ_BIN):
-            rows[1] = status("coqc", facts.ROCQ_BIN, True, coq_hint)
+            rows[1] = status("coqc", facts.ROCQ_BIN, True, INSTALL_HINT)
         return rows
 
     def tool_versions(self) -> dict[str, str]:
@@ -207,23 +190,28 @@ class RefinedCBackend:
     def project_file(self) -> Path:
         return self.workspace_dir / facts.PROJECT_FILE
 
+    def _require_tool(self) -> None:
+        if not self._have_refinedc():
+            raise BackendToolMissing(f"`{self.refinedc_bin}` not found: {INSTALL_HINT}")
+
     def prepare(self, tus: list[TranslationUnit], repo_root: Path) -> None:
         if self.project_file.exists():
             return
-        if self._have_refinedc():
-            argv = [
-                self.refinedc_bin,
-                *facts.INIT_ARGV,
-                facts.INIT_COQ_PATH_FLAG.format(path=self.coq_root),
-            ]
-            r = self._run(argv, self.workspace_dir, 120)
-            if r.ok and self.project_file.exists():
-                return
-        # Fall back to writing the project file ourselves so the rest of the
-        # pipeline (and tests) can run without the tool.
-        self.project_file.write_text(
-            facts.PROJECT_FILE_TEMPLATE.format(coq_root=self.coq_root), encoding="utf-8"
-        )
+        self._require_tool()
+        argv = [
+            self.refinedc_bin,
+            *facts.INIT_ARGV,
+            facts.INIT_COQ_PATH_FLAG.format(path=self.coq_root),
+        ]
+        r = self._run(argv, self.workspace_dir, 120)
+        if not r.ok:
+            raise BackendToolMissing(
+                "`refinedc init` failed in the backend workspace: " + (r.stderr or r.stdout).strip()
+            )
+        if not self.project_file.exists():  # older refinedc versions write nothing on init
+            self.project_file.write_text(
+                facts.PROJECT_FILE_TEMPLATE.format(coq_root=self.coq_root), encoding="utf-8"
+            )
 
     # Paths -------------------------------------------------------------------
 
@@ -257,15 +245,13 @@ class RefinedCBackend:
 
     def _sync_opaque(self, repo_root: Path | None) -> None:
         """Refresh the opaque-float header and the rewritten shadow copies of
-        the project's headers (no-op when the feature is off)."""
-        if not self.opaque_floats:
-            return
+        the project's headers."""
         opaque.write_opaque_header(self.workspace_dir, self.target)
         if repo_root is not None:
             opaque.sync_shadow_headers(Path(repo_root), self._shadow_root)
 
     def _rewrite(self, text: str) -> str:
-        return opaque.rewrite_floats(text) if self.opaque_floats else text
+        return opaque.rewrite_floats(text)
 
     def _cpp_flags(self, tu: TranslationUnit | None, repo_root: Path | None) -> list[str]:
         """-I / -D for `refinedc check`: the original source's directory (so
@@ -314,16 +300,15 @@ class RefinedCBackend:
             add_inc(str(p))
         for m in self.defines:
             flags.append(facts.DEFINE_FLAG_FMT.format(macro=m))
-        if self.opaque_floats and repo_root is not None:
+        if repo_root is not None:
             shadows: list[str] = []
             for pdir in project_dirs:
                 sd = opaque.shadow_dir_for(pdir, Path(repo_root), self._shadow_root)
                 if sd is not None:
                     shadows.append(facts.INCLUDE_FLAG_FMT.format(dir=str(sd)))
             flags = shadows + flags
-        if self.posix_shims:
-            for shim in self._shim_dirs():
-                flags.append(facts.INCLUDE_FLAG_FMT.format(dir=str(shim)))
+        for shim in self._shim_dirs():
+            flags.append(facts.INCLUDE_FLAG_FMT.format(dir=str(shim)))
         return flags
 
     def _shim_dirs(self) -> list[Path]:
@@ -347,16 +332,11 @@ class RefinedCBackend:
         argv = [self.refinedc_bin, *facts.CHECK_ARGV, facts.NO_EXTRA_ANALYSIS_FLAG]
         if no_build:
             argv.append(facts.NO_BUILD_FLAG)
-        if self.posix_shims:
-            for name in facts.FORCE_INCLUDED_SHIMS:
-                if (_SHIMS_DIR / name).is_file():
-                    argv.append(facts.INCLUDE_FILE_FLAG_FMT.format(file=str(_SHIMS_DIR / name)))
-        if self.opaque_floats:
-            argv.append(
-                facts.INCLUDE_FILE_FLAG_FMT.format(
-                    file=str(self.workspace_dir / opaque.OPAQUE_HEADER)
-                )
-            )
+        for name in facts.FORCE_INCLUDED_SHIMS:
+            argv.append(facts.INCLUDE_FILE_FLAG_FMT.format(file=str(_SHIMS_DIR / name)))
+        argv.append(
+            facts.INCLUDE_FILE_FLAG_FMT.format(file=str(self.workspace_dir / opaque.OPAQUE_HEADER))
+        )
         argv += self._cpp_flags(tu, repo_root)
         argv += self.extra_check_args
         argv.append(str(c_file))
@@ -380,12 +360,9 @@ class RefinedCBackend:
                     dir=str(Path(prefix) / "lib" / "refinedc" / "include")
                 )
             )
-        if self.posix_shims:
-            for name in facts.FORCE_INCLUDED_SHIMS:
-                if (_SHIMS_DIR / name).is_file():
-                    argv += ["-include", str(_SHIMS_DIR / name)]
-        if self.opaque_floats:
-            argv += ["-include", str(self.workspace_dir / opaque.OPAQUE_HEADER)]
+        for name in facts.FORCE_INCLUDED_SHIMS:
+            argv += ["-include", str(_SHIMS_DIR / name)]
+        argv += ["-include", str(self.workspace_dir / opaque.OPAQUE_HEADER)]
         argv += self._cpp_flags(tu, repo_root)
         argv += [facts.DEFINE_FLAG_FMT.format(macro=m) for m in facts.CPP_PREDEFINES]
         argv.append(str(c_file))
@@ -478,13 +455,7 @@ class RefinedCBackend:
         text = self._rewrite(text)
         dest.write_text(text, encoding="utf-8")  # a copy; the user's file is untouched
         self._sync_opaque(repo_root)
-        if not self._have_refinedc():
-            reason = "refinedc not installed; front-end check skipped"
-            return TranslateResult(
-                supported={n: True for n in names},
-                reasons={n: reason for n in names},
-                artifacts={"copy": str(dest)},
-            )
+        self._require_tool()
         self.prepare([tu], repo_root)
         supported = {n: True for n in names}
         reasons: dict[str, str] = {}
@@ -629,10 +600,9 @@ class RefinedCBackend:
             dest.write_text(text, encoding="utf-8")
         else:
             tu_error = "front-end still failing after isolating every function"
-        if self.opaque_floats:
-            reasons = {n: opaque.explain_reason(r) for n, r in reasons.items()}
-            if tu_error:
-                tu_error = opaque.explain_reason(tu_error)
+        reasons = {n: opaque.explain_reason(r) for n, r in reasons.items()}
+        if tu_error:
+            tu_error = opaque.explain_reason(tu_error)
         if tu_error:
             for n in names:
                 if supported[n]:

@@ -101,12 +101,13 @@ class VerifyConfig(BaseModel):
 
 
 class HuntersConfig(BaseModel):
-    cbmc: bool = True
-    cerberus: bool = True
-    sanitizers: bool = False
+    """`fver hunt` always runs CBMC. The sanitizer hunter rebuilds and runs
+    the project's own tests, so it needs to know how: set test_command."""
+
     cbmc_unwind: int = 8
     cbmc_timeout_seconds: int = 300
-    # Command that runs the project's own tests (used by cerberus/sanitizer hunters).
+    # Command that runs the project's tests, e.g. "make test". Unset: the
+    # sanitizer hunter has nothing to run.
     test_command: str | None = None
 
 

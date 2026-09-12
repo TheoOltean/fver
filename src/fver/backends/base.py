@@ -25,6 +25,11 @@ from typing import Protocol, runtime_checkable
 from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit
 
 
+class BackendToolMissing(RuntimeError):
+    """The backend's external tool is not installed or not working. Raised
+    instead of degrading silently; `fver setup` installs everything."""
+
+
 class CheckOutcome(str, Enum):
     OK = "ok"  # proof accepted by the checker
     AUTOMATION_STUCK = "automation_stuck"  # the annotations are wrong/insufficient

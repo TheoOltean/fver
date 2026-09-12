@@ -246,8 +246,8 @@ class CbmcHunter:
                 found=path is not None,
                 path=path,
                 version=proc.version_of(["cbmc", "--version"]) if path else None,
-                required=False,
-                hint=INSTALL_HINT,
+                required=True,
+                hint="run `fver setup`",
             )
         ]
 

@@ -59,9 +59,7 @@ def run_hunt(ctx, only: list[str] | None, function: str | None, file: str | None
         return []
     hunters = enabled_hunters(ctx.config.hunters, only)
     if not hunters:
-        console.print(
-            "[yellow]No hunters enabled.[/] See [hunters] in .fver/config.toml or use --only."
-        )
+        console.print("[yellow]No such hunter.[/] Choose from: cbmc, sanitizers.")
         return []
     by_id = {f.id: f for f in functions}
     run_id = ctx.ledger.start_run(
@@ -157,7 +155,7 @@ def register(app: typer.Typer) -> None:
     @app.command("hunt")
     def hunt(
         only: list[str] = typer.Option(
-            None, "--only", help="Run only these hunters (cbmc, cerberus, sanitizers)."
+            None, "--only", help="Run only these hunters (cbmc, sanitizers)."
         ),  # noqa: B008
         function: str | None = typer.Option(
             None, "--function", "-f", help="Restrict to one function name."
@@ -167,7 +165,7 @@ def register(app: typer.Typer) -> None:
         ),
         verbose: bool = typer.Option(False, "--verbose", "-v"),
     ) -> None:
-        """Run bug finders (CBMC, Cerberus, sanitizers) over the indexed code."""
+        """Run the bug finders (CBMC; sanitizers when hunters.test_command is set) over the indexed code."""
         from fver.core.context import AppContext
 
         ctx = AppContext.load(need_backend=False)

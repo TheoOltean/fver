@@ -57,6 +57,7 @@ jobs:
         env:
           FVER_REPO: file://${{ github.workspace }}
           FVER_REF: ${{ github.sha }}
+          FVER_SKIP_SETUP: "1"  # the opam toolchain build is too slow for CI; tests use the null backend
         run: |
           sh get-fver.sh
           export PATH="$HOME/.local/bin:$PATH"

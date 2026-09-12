@@ -6,7 +6,7 @@ import pytest
 
 from fver.core.config import HuntersConfig
 from fver.core.models import FunctionInfo, TranslationUnit
-from fver.hunters import base, cbmc, cerberus, sanitizers
+from fver.hunters import base, cbmc, sanitizers
 from fver.util import proc
 
 FIX = Path(__file__).parent / "fixtures" / "hunters"
@@ -84,10 +84,11 @@ def test_locator_maps_lines_to_functions():
     assert loc.by_name("add").id == "tu1:add"
 
 
-def test_enabled_hunters_respects_config_and_only():
-    cfg = HuntersConfig(cbmc=True, cerberus=False, sanitizers=False)
-    assert [h.name for h in base.enabled_hunters(cfg)] == ["cbmc"]
-    assert [h.name for h in base.enabled_hunters(cfg, ["cerberus"])] == ["cerberus"]
+def test_enabled_hunters_cbmc_always_sanitizers_with_test_command():
+    assert [h.name for h in base.enabled_hunters(HuntersConfig())] == ["cbmc"]
+    cfg = HuntersConfig(test_command="make test")
+    assert [h.name for h in base.enabled_hunters(cfg)] == ["cbmc", "sanitizers"]
+    assert [h.name for h in base.enabled_hunters(HuntersConfig(), ["sanitizers"])] == ["sanitizers"]
     assert base.enabled_hunters(cfg, ["nope"]) == []
 
 
@@ -168,7 +169,7 @@ def test_cbmc_absent_and_timeout(tmp_path, monkeypatch):
         == []
     )
     st = cbmc.CbmcHunter().doctor()[0]
-    assert not st.found and "cbmc" in st.hint
+    assert not st.found and "fver setup" in st.hint
     monkeypatch.setattr(proc, "which", lambda n: "/usr/bin/cbmc")
     monkeypatch.setattr(
         proc, "run", lambda argv, **kw: proc.ProcResult(argv, -1, "", "", 1.0, timed_out=True)
@@ -179,58 +180,6 @@ def test_cbmc_absent_and_timeout(tmp_path, monkeypatch):
         )
         == []
     )
-
-
-# --- cerberus -----------------------------------------------------------
-
-
-def test_cerberus_parsing(tmp_path):
-    repo = tmp_path
-    (repo / "src").mkdir()
-    recs = cerberus.parse_cerberus_output(
-        (FIX / "cerberus_output.txt").read_text(), repo, str(repo), "src/buf.c"
-    )
-    assert [(r["kind"], r["line"], r["informational"]) for r in recs] == [
-        ("signed_overflow", 20, False),
-        ("null_or_invalid_deref", 12, False),
-        ("cerberus_unsupported", 30, True),
-    ]
-
-
-def test_cerberus_run_exec_only_with_main(tmp_path, monkeypatch):
-    repo = tmp_path
-    (repo / "src").mkdir()
-    calls: list[list[str]] = []
-    out = (FIX / "cerberus_output.txt").read_text()
-    monkeypatch.setattr(proc, "which", lambda n: "/usr/bin/cerberus")
-    monkeypatch.setattr(
-        proc,
-        "run",
-        lambda argv, **kw: (calls.append(argv), proc.ProcResult(argv, 0, out, "", 0.0))[1],
-    )
-    h = cerberus.CerberusHunter()
-    f1 = h.run([_tu(repo)], _functions(), repo, tmp_path / "w", HuntersConfig())
-    assert len(calls) == 1 and "--exec" not in calls[0]
-    assert {f.tool for f in f1} == {"cerberus-elab"}
-    assert f1[0].function_id == "tu1:add"
-    calls.clear()
-    fns = _functions() + [
-        FunctionInfo("tu1:main", "main", "tu1", "src/buf.c", 30, 40, "int main(void)", "h3")
-    ]
-    f2 = h.run([_tu(repo)], fns, repo, tmp_path / "w", HuntersConfig())
-    assert len(calls) == 2 and "--exec" in calls[1] and "--batch" in calls[1]
-    assert any(f.tool == "cerberus-exec" and f.witness for f in f2)
-
-
-def test_cerberus_absent(tmp_path, monkeypatch):
-    monkeypatch.setattr(proc, "which", lambda n: None)
-    assert (
-        cerberus.CerberusHunter().run(
-            [_tu(tmp_path)], [], tmp_path, tmp_path / "w", HuntersConfig()
-        )
-        == []
-    )
-    assert "opam" in cerberus.CerberusHunter().doctor()[0].hint
 
 
 # --- sanitizers ---------------------------------------------------------
@@ -248,19 +197,9 @@ def test_sanitizer_parsing(tmp_path):
     assert "SUMMARY" in recs[1]["witness"]
 
 
-def test_sanitizer_disabled_without_test_command(tmp_path):
+def test_sanitizer_has_nothing_to_run_without_test_command(tmp_path):
     h = sanitizers.SanitizerHunter()
-    assert h.run([], [], tmp_path, tmp_path / "w", HuntersConfig(sanitizers=True)) == []
-    assert (
-        h.run(
-            [],
-            [],
-            tmp_path,
-            tmp_path / "w",
-            HuntersConfig(sanitizers=False, test_command="make test"),
-        )
-        == []
-    )
+    assert h.run([], [], tmp_path, tmp_path / "w", HuntersConfig()) == []
 
 
 def test_sanitizer_runs_tests_with_flags(tmp_path, monkeypatch):
@@ -279,7 +218,7 @@ def test_sanitizer_runs_tests_with_flags(tmp_path, monkeypatch):
     monkeypatch.setattr(proc, "run_shell", fake_shell)
     monkeypatch.setattr(plat, "find_compiler", lambda: "cc")
     monkeypatch.setattr(plat, "compiler_supports", lambda cc, flags: True)
-    cfg = HuntersConfig(sanitizers=True, test_command="make test")
+    cfg = HuntersConfig(test_command="make test")
     findings = sanitizers.SanitizerHunter().run([], _functions(), repo, tmp_path / "w", cfg)
     assert seen["cmd"] == "make test"
     assert "fsanitize=address,undefined" in seen["env"]["CFLAGS"]

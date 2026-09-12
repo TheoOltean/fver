@@ -43,7 +43,9 @@ def credential_status(config_key: str | None = None) -> ToolStatus:
     return ToolStatus(
         "anthropic credentials",
         False,
-        hint="run `ant auth login`, or export ANTHROPIC_API_KEY",
+        required=False,  # informational: session mode needs none
+        hint="API mode only: `fver config set --user model.api_key ...`, "
+        "ANTHROPIC_API_KEY, or `ant auth login`. Session mode (Claude Code) needs none.",
     )
 
 
@@ -93,8 +95,7 @@ def collect_statuses(online: bool = False) -> tuple[list[ToolStatus], str | None
             ),
         )
     )
-    rows.append(_tool("bear", False, install_hint("bear", note="captures Makefile builds")))
-    rows.append(_tool("cmake", False, install_hint("cmake")))
+    rows.append(_tool("bear", True, "run `fver setup`"))
     try:
         from fver.hunters.base import builtin_hunters
 
@@ -145,7 +146,7 @@ def render(rows: list[ToolStatus]) -> int:
             status = "[red]missing[/]"
             missing_required += 1
         else:
-            status = "[yellow]missing (optional)[/]"
+            status = "[yellow]not set[/]"
         table.add_row(r.name, status, r.version or r.path or "", "" if r.found else r.hint)
     console.print(table)
     return 1 if missing_required else 0
@@ -158,7 +159,7 @@ def register(app: typer.Typer) -> None:
             False, "--online", help="Also make one small API call to verify credentials."
         ),
     ) -> None:
-        """Check external tools and API credentials."""
+        """Check that every tool fver needs is installed (see `fver setup`) and whether API credentials are set."""
         rows, _ = collect_statuses(online=online)
         code = render(rows)
         raise typer.Exit(code=code)

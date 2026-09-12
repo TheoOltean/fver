@@ -318,8 +318,8 @@ def test_registry_loads_both_backends(tmp_path: Path):
 
 def test_doctor_rows_are_labelled(backend: RefinedCBackend):
     statuses = {s.name: s for s in backend.doctor()}
-    assert set(statuses) >= {"refinedc", "coqc", "dune", "opam"}
-    assert not statuses["refinedc"].found and "opam" in statuses["refinedc"].hint
+    assert set(statuses) == {"refinedc", "coqc", "dune"}
+    assert not statuses["refinedc"].found and "fver setup" in statuses["refinedc"].hint
 
 
 def test_paths_are_coq_identifiers(backend: RefinedCBackend, task: FunctionTask):
@@ -342,8 +342,6 @@ def test_cpp_flags_forward_source_dir_includes_and_defines(
     assert flags[0] == f"-I{backend._shadow_root / 'src'}"
     assert flags[2] == f"-I{task.repo_root / 'src'}"
     assert f"-I{Path(task.tu.directory) / 'include'}" in flags and "-DFOO=1" in flags
-    backend.opaque_floats = False
-    assert backend._cpp_flags(task.tu, task.repo_root)[0] == f"-I{task.repo_root / 'src'}"
     argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=True)
     assert argv[:4] == [backend.refinedc_bin, "check", "--no-extra-analysis", "--no-build"]
     assert argv[-1] == "x.c"
@@ -388,7 +386,7 @@ def test_check_without_tool_builds_source_and_returns_tool_error(
         files={"function.c": ANNOTATED, "lemmas.v": "Lemma t : True. Proof. exact I. Qed."}
     )
     res = backend.check(task, sub, timeout_seconds=5)
-    assert res.outcome is CheckOutcome.TOOL_ERROR and "opam" in res.feedback
+    assert res.outcome is CheckOutcome.TOOL_ERROR and "fver setup" in res.feedback
     src = Path(res.artifacts["source"])
     assert (
         src.is_relative_to(backend.workspace_dir) and src.parent.name == "f_0c39be4cc5fb9ec6_zero"
@@ -419,10 +417,14 @@ def test_marker_offset_from_generated_code():
     assert RefinedCBackend._marker_offset("nothing here", 4) is None
 
 
-def test_translate_without_tool_marks_supported(backend: RefinedCBackend, task: FunctionTask):
-    res = backend.translate(task.tu, [task.function], task.repo_root)
-    assert res.supported == {"zero": True}
-    copy = Path(res.artifacts["copy"])
+def test_translate_without_tool_is_an_error_not_a_guess(
+    backend: RefinedCBackend, task: FunctionTask
+):
+    from fver.backends.base import BackendToolMissing
+
+    with pytest.raises(BackendToolMissing, match="fver setup"):
+        backend.translate(task.tu, [task.function], task.repo_root)
+    copy = backend._tu_dir(task.tu) / f"{backend._stem_for(task.tu.source_path)}.c"
     assert copy.parent.name == "tu_0c39be4cc5fb9ec6" and copy.name == "a.c"
     assert copy.read_text().startswith(facts.HEADER_INCLUDE)
     assert (task.repo_root / "src" / "a.c").read_text() == SOURCE
@@ -495,12 +497,12 @@ def test_translate_maps_frontend_errors_to_functions(
     assert "binary operation" in res.reasons["after"]
 
 
-def test_prepare_writes_project_file_when_tool_missing(
-    backend: RefinedCBackend, task: FunctionTask
-):
-    backend.prepare([task.tu], task.repo_root)
-    assert backend.project_file.exists()
-    assert facts.DEFAULT_COQ_ROOT in backend.project_file.read_text()
+def test_prepare_without_tool_raises(backend: RefinedCBackend, task: FunctionTask):
+    from fver.backends.base import BackendToolMissing
+
+    with pytest.raises(BackendToolMissing):
+        backend.prepare([task.tu], task.repo_root)
+    assert not backend.project_file.exists()
 
 
 def test_audit_without_generated_proof_or_coqc_fails_closed(
@@ -602,8 +604,6 @@ def test_shim_dirs_come_after_project_flags(
     posix = f"-I{runtime / 'libc' / 'include' / 'posix'}"
     assert flags.index(posix) < flags.index(f"-I{mod._SHIMS_DIR}")
     assert flags.index(f"-I{Path(task.tu.directory) / 'include'}") < flags.index(posix)
-    backend.posix_shims = False
-    assert not any(str(mod._SHIMS_DIR) in f for f in backend._cpp_flags(task.tu, task.repo_root))
     for h in facts.SHIMMED_HEADERS:
         assert (mod._SHIMS_DIR / h).exists(), h
 
@@ -631,10 +631,7 @@ def test_check_argv_force_includes_prelude(backend: RefinedCBackend, task: Funct
 
     argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=False)
     assert f"--include={mod._SHIMS_DIR / facts.PRELUDE_HEADER}" in argv
-    backend.posix_shims = False
-    backend.opaque_floats = False  # its generated header is force-included too
-    argv = backend._check_argv(Path("x.c"), task.tu, task.repo_root, no_build=False)
-    assert not any(a.startswith("--include=") for a in argv)
+    assert f"--include={mod._SHIMS_DIR / 'setjmp.h'}" in argv
 
 
 def test_enclosing_definition_by_brace_scan():

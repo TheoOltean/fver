@@ -22,13 +22,14 @@ never modifies user files: all state lives in `<repo>/.fver/`.
 | `backends/refinedc/opaque.py` | Opaque floating point: rewrites `float`/`double`/`long double` to same-size structs in the TU copy and in shadow copies of project headers (`<workspace>/shadow/`, placed before the real include dirs); generates `fver_opaque.h`. Float-computing functions become unsupported; everything else in the file stays checkable | yes |
 | `backends/refinedc/shims/` | Header shims for the Cerberus front-end: POSIX headers it lacks (`-I` after project dirs) and `setjmp.h` (force-included under Cerberus's own guard because Cerberus's copy ends in `#error`) | yes |
 | `backends/null.py` | A fake backend for tests and pipeline dry runs | yes (trivially) |
-| `hunters/` | Bug finders: CBMC, Cerberus interpreter, sanitizers. Produce `Finding`s | no |
+| `hunters/` | Bug finders: CBMC always; sanitizers over the project's tests when `hunters.test_command` is set. Produce `Finding`s | no |
 | `agent/` | Anthropic client, prompt assembly, the propose -> check -> repair loop, retrieval of examples, budget, cheating detection | only via `Backend` |
 | `agent/protocol.py` | The agent protocol: task packaging, check, next, changed as dicts; shared by CLI and MCP | only via `Backend` |
 | `mcp/server.py` | MCP server over the protocol (`fver mcp`) | no |
 | `agent/invalidate.py` | Stale-proof tracking: explicit STALE claims when a body, callee contract, external spec or tool version changed; caller invalidation after a contract change | only via `Backend` |
 | `commands/` | One module per subcommand, each with `register(app)` | via AppContext |
-| `commands/docs.py` | `fver docs` and the `.fver/README.md` that `fver init` writes: layout, command reference generated from the Typer app, config reference from the pydantic defaults, prover workflow (mirrored by `.claude/skills/fver/SKILL.md`, test-enforced) | no |
+| `commands/setup.py` | `fver setup`: installs every external tool (package manager for bear/cbmc/opam, then an opam switch `fver` with Rocq, Iris, Cerberus and RefinedC at pinned commits) and records the binary paths in the user config. Nothing is optional: missing tools are errors, never silently skipped | no |
+| `commands/docs.py` | `fver docs` and the `.fver/GUIDE.md` that `fver init` writes: layout, command reference generated from the Typer app, config reference from the pydantic defaults, prover workflow (mirrored by `.claude/skills/fver/SKILL.md`, test-enforced) | no |
 | `cli.py` | Typer app; imports command modules | no |
 
 ## Data flow
@@ -63,14 +64,13 @@ its callees have contracts. `--no-deps` disables this. External callees
 
 ## Bug-hunter semantics
 
-Hunters produce `Finding`s with a `confidence`. CBMC run from a real `main`
+There are two hunters: CBMC, which always runs, and the sanitizers, which rebuild and run the project's own tests and therefore need `hunters.test_command`. Hunters produce `Finding`s with a `confidence`. CBMC run from a real `main`
 yields `high`; CBMC run per function with unconstrained inputs yields `low`
 (the reported violation may be a precondition every caller satisfies). Only
 high-confidence findings of a UB kind become `bug_found` claims. Each hunt
 run replaces that hunter's previous findings for the files it covered, and a
 function whose earlier hunter-issued `bug_found` is not reproduced gets a
-superseding claim. `missing_body`, `bound_reached`, `tool_error` and
-`cerberus_unsupported` are informational kinds.
+superseding claim. `missing_body`, `bound_reached` and `tool_error` are informational kinds.
 
 ## Rescans
 

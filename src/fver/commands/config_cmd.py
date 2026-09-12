@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from pathlib import Path
 from typing import Any
 
 import tomli_w
@@ -63,6 +64,24 @@ def _render(value: Any) -> str:
     return str(value)
 
 
+def set_user_value(key: str, raw: str) -> Path:
+    """Set one key in the user-level config, keeping the file minimal."""
+    path = user_config_path()
+    data = (
+        tomllib.loads(path.read_text(encoding="utf-8", errors="replace")) if path.exists() else {}
+    )
+    new_cfg = set_value(FverConfig.model_validate(data), key, raw)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    defaults = FverConfig().model_dump(mode="json")
+    minimal = _diff(defaults, new_cfg.model_dump(mode="json"))
+    path.write_text(tomli_w.dumps(_drop_none(minimal)), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
 @config_app.command("get")
 def config_get(key: str = typer.Argument(..., help="Dotted key, e.g. model.effort")) -> None:
     ws = Workspace.open()
@@ -88,24 +107,7 @@ def config_set(
     ),
 ) -> None:
     if user:
-        path = user_config_path()
-        data = (
-            tomllib.loads(path.read_text(encoding="utf-8", errors="replace"))
-            if path.exists()
-            else {}
-        )
-        new_cfg = set_value(FverConfig.model_validate(data), key, value)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Persist only what differs from defaults so the file stays minimal.
-        defaults = FverConfig().model_dump(mode="json")
-        current = new_cfg.model_dump(mode="json")
-        minimal = _diff(defaults, current)
-        path.write_text(tomli_w.dumps(_drop_none(minimal)), encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-        typer.echo(f"{key} set in {path}")
+        typer.echo(f"{key} set in {set_user_value(key, value)}")
         return
     ws = Workspace.open()
     if key == "model.api_key":

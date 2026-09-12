@@ -1,5 +1,6 @@
 """fver command-line entry point.
 
+fver setup     install every external tool (bear, cbmc, opam switch with RefinedC)
 fver init      create .fver/ in the current repository
 fver doctor    check external tools and API credentials
 fver scan      capture the build, index functions, run the backend front-end
@@ -30,6 +31,7 @@ app = typer.Typer(
 
 _COMMAND_MODULES = [
     "fver.commands.init",
+    "fver.commands.setup",
     "fver.commands.doctor",
     "fver.commands.scan",
     "fver.commands.hunt",

@@ -17,11 +17,11 @@ dependencies = [
   "tomli-w>=1.0",
   "tree-sitter>=0.23",
   "tree-sitter-c>=0.23",
+  "mcp>=1.2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov", "ruff", "mypy", "mcp>=1.2"]
-mcp = ["mcp>=1.2"]
+dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
 
 [project.scripts]
 fver = "fver.cli:main"

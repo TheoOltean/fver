@@ -15,31 +15,36 @@ fver never edits your source files. Everything it produces lives in
 
 ## Install
 
-One line, no sudo, on any Unix-like system (Linux, macOS, BSD). Needs
-Python 3.11+ and curl or wget; installs `uv` if it is missing and puts
-`fver` in `~/.local/bin`:
+One line, no sudo for fver itself, on Linux or macOS. It installs `uv` if
+missing, puts `fver` in `~/.local/bin`, then runs `fver setup`, which
+installs everything else fver needs: `bear`, `cbmc`, and an opam switch
+holding Rocq, Iris, Cerberus and RefinedC, pinned to the commits fver is
+tested against. The first run builds the proof toolchain and takes 20 to 40
+minutes; rerunning resumes where it stopped.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/TheoOltean/fver/main/get-fver.sh | sh
 ```
 
+System packages go through your package manager (brew, apt-get, dnf or
+pacman, which may ask for sudo). A C compiler must already be present
+(`xcode-select --install` on macOS, `build-essential` on Debian/Ubuntu).
+There are no optional tools: `fver doctor` is either all green or tells you
+to run `fver setup`.
+
 From a local checkout instead:
 
 ```sh
-./install.sh                 # uv tool install --editable, or pipx
+./install.sh                 # uv tool install --editable, then fver setup
 ```
 
 For development:
 
 ```sh
 uv venv && uv pip install -e ".[dev]"
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q                                  # no toolchain needed
+FVER_REFINEDC_BIN=~/.opam/fver/bin/refinedc .venv/bin/python -m pytest -q tests/integration
 ```
-
-External tools (checked by `fver doctor`): a C compiler, `bear` or CMake
-for build capture, `cbmc` and `cerberus` for bug hunting, and for the
-RefinedC backend `opam`, Rocq, dune and `refinedc`. fver runs without any
-of them, but with reduced function.
 
 To pin a release instead of `main`, set `FVER_REF` (a tag or commit) before
 piping to `sh`, e.g. `FVER_REF=v0.1.0`. To upgrade, run the one-liner again.
@@ -61,9 +66,9 @@ the SDK will pick up the profile. `fver doctor` shows which source is used.
 ```sh
 cd your-c-repo
 fver init          # creates .fver/config.toml; detects your build system and target
-fver doctor        # what tools and credentials are available
+fver doctor        # every tool present? credentials set?
 fver scan          # capture the build, index every function, run the backend front-end
-fver hunt          # run CBMC / Cerberus / sanitizers; concrete bugs go straight into the ledger
+fver hunt          # CBMC (and the sanitizers over your tests, if hunters.test_command is set)
 fver verify        # let the LLM prove functions, highest attack surface first
 fver status        # what is proven
 fver show parse_header
@@ -78,7 +83,7 @@ model (`[model]`), the bug finders (`[hunters]`). Read and write it with
 `--no-deps`, `--model` exist to override the config for one run; `--dry-run`
 prints the plan and cost estimate without doing anything.
 
-`fver init` also writes `.fver/README.md`: the layout, every command with its
+`fver init` also writes `.fver/GUIDE.md`: the layout, every command with its
 options, every config key with its default, and the proving workflow, so an
 agent or a colleague working in the repository has the documentation next to
 the state. `fver docs` prints it; `fver docs --write` refreshes it after an
@@ -106,7 +111,6 @@ Register the MCP server once (from anywhere; it opens the `.fver/` of the
 repository the session is in):
 
 ```sh
-uv tool install --force 'fver[mcp]'      # or: pipx install 'fver[mcp]'
 claude mcp add fver -- fver mcp
 ```
 

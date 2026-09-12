@@ -131,7 +131,7 @@ class SanitizerHunter:
                 found=ok,
                 path=proc.which(cc) if cc else None,
                 version=cc,
-                required=False,
+                required=True,
                 hint=""
                 if ok
                 else "the C compiler does not accept -fsanitize=address,undefined "
@@ -147,10 +147,8 @@ class SanitizerHunter:
         workdir: Path,
         config: HuntersConfig,
     ) -> list[Finding]:
-        if not config.sanitizers or not config.test_command:
-            log.info(
-                "sanitizer hunter disabled (hunters.sanitizers=false or no hunters.test_command)"
-            )
+        if not config.test_command:
+            log.info("sanitizer hunter has nothing to run: set hunters.test_command")
             return []
         workdir.mkdir(parents=True, exist_ok=True)
         log.warning(
