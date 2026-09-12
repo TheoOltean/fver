@@ -44,7 +44,7 @@ WP_MISSING = """[kernel:annot:missing-spec] m.c:1: Warning:
 """
 WP_RANGE = """[kernel] Parsing t.c (with preprocessing)
 [wp] Running WP plugin...
-[wp] t.c:196: User Error: 
+[wp] t.c:196: User Error:
   Invalid infinite range destination_0+(0..)
 [kernel] Plug-in wp aborted: invalid user input.
 """
