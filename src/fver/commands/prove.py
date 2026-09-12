@@ -119,6 +119,7 @@ def run_prove(
         return 0
     settings = LLMSettings(
         api_key=cfg.model.api_key,
+        workspace_id=cfg.model.workspace_id,
         base_url=cfg.model.base_url,
         model=cfg.model.model,
         effort=cfg.model.effort,

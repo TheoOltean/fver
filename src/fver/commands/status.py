@@ -90,7 +90,7 @@ def overview(ctx: AppContext) -> None:
         ("unsupported", "right"),
         ("", "left"),
     ):
-        t.add_column(col, justify=just)  # type: ignore[arg-type]
+        t.add_column(col, justify=just, no_wrap=col == "file")  # type: ignore[arg-type]
     for path in sorted(by_file):
         c = by_file[path]
         note = "cannot read: " + unreadable[path].split(" | ")[0][:70] if path in unreadable else ""

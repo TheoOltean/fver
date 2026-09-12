@@ -52,6 +52,7 @@ class Completion:
 @dataclass
 class LLMSettings:
     api_key: str | None = None
+    workspace_id: str | None = None  # required by keys that are not scoped to a workspace
     base_url: str | None = None
     model: str = "claude-fable-5-1"
     effort: str = "high"
@@ -106,6 +107,8 @@ class LLMClient:
                 kwargs["api_key"] = self.settings.api_key
             if self.settings.base_url:
                 kwargs["base_url"] = self.settings.base_url
+            if self.settings.workspace_id:
+                kwargs["default_headers"] = {"anthropic-workspace-id": self.settings.workspace_id}
             self._client = anthropic.Anthropic(**kwargs)
         return self._client
 

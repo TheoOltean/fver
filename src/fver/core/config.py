@@ -35,6 +35,9 @@ class ModelConfig(BaseModel):
     # Falls back to ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / an
     # `ant auth login` profile when unset.
     api_key: str | None = None
+    # Only for keys that are not scoped to a workspace (the API then demands one):
+    # console.anthropic.com -> Settings -> Workspaces.
+    workspace_id: str | None = None
     base_url: str | None = None
     model: str = "claude-fable-5-1"
     effort: str = "high"  # low | medium | high | xhigh | max
@@ -111,6 +114,7 @@ CONFIG_HEADER = """\
 
 ALWAYS_WRITTEN = (
     "model.api_key",
+    "model.workspace_id",
     "model.model",
     "model.effort",
     "budget.max_usd_per_run",
@@ -120,6 +124,7 @@ ALWAYS_WRITTEN = (
 SECTION_COMMENTS = {
     "model": (
         "api_key: your Anthropic key (or leave empty and export ANTHROPIC_API_KEY).\n"
+        "# workspace_id: only if the API says the key is not scoped to a workspace.\n"
         "# effort: low | medium | high | xhigh | max."
     ),
     "budget": "Money, attempt and size caps, per function and per run.",

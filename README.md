@@ -65,6 +65,7 @@ key and its default in a comment above:
 ```toml
 [model]
 api_key = "sk-ant-..."     # or leave empty and export ANTHROPIC_API_KEY
+workspace_id = ""          # only if the API says the key is not scoped to a workspace
 model = "claude-fable-5-1"
 effort = "high"            # low | medium | high | xhigh | max
 
