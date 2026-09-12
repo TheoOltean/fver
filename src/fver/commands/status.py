@@ -109,6 +109,41 @@ def overview(ctx: AppContext) -> None:
     console.print("\n`fver status <file>` lists its functions; `fver status <function>` shows one.")
 
 
+def _contract_lines(ctx: AppContext, fn: FunctionInfo) -> list[str]:
+    """The accepted contract of a verified function, one clause per line."""
+    from fver.prove import store
+
+    loaded = store.load_accepted(ctx.ws, fn.source_path, fn.name)
+    if loaded is None or ctx.backend is None:
+        return []
+    text = ctx.backend.extract_spec(loaded[0], fn)
+    return [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+
+
+def everything(ctx: AppContext) -> None:
+    """`fver status -A`: every function, by file, with its state, the reason
+    when it is not proven, and the contract when it is."""
+    rows = _rows(ctx)
+    unreadable = _unreadable(ctx)
+    current = None
+    for r in rows:
+        fn = r.function
+        if fn.source_path != current:
+            current = fn.source_path
+            console.print(f"\n[bold]{current}[/]")
+            if current in unreadable:
+                console.print(f"  [red]cannot read: {unreadable[current][:100]}[/]")
+        note = (r.claim.message if r.claim else "")[:110]
+        console.print(f"  {styled(r.status):22} {fn.name}  [dim](line {fn.start_line})[/]")
+        if r.status is Status.VERIFIED:
+            for ln in _contract_lines(ctx, fn):
+                console.print("      " + ln, markup=False, highlight=False)
+        elif note:
+            console.print(f"      [dim]{note}[/]", markup=True, highlight=False)
+    for path in sorted(set(unreadable) - {r.function.source_path for r in rows}):
+        console.print(f"\n[bold]{path}[/]\n  [red]cannot read: {unreadable[path][:100]}[/]")
+
+
 def file_page(ctx: AppContext, pattern: str) -> int:
     rows = [
         r
@@ -214,6 +249,12 @@ def register(app: typer.Typer) -> None:
             help="A file (or glob) for its functions, a function name for its details.",
             show_default=False,
         ),
+        everything_: bool = typer.Option(
+            False,
+            "-A",
+            "--all",
+            help="Every function, by file: its state, why if not proven, the contract if proven.",
+        ),
     ) -> None:
         """What is proven, what is not, and why. Indexes the code first if needed."""
         from fver.commands.prove import refresh_index
@@ -222,7 +263,10 @@ def register(app: typer.Typer) -> None:
         setup_logging(ctx.ws.logs_dir, run_name="status")
         try:
             refresh_index(ctx)
-            if target is None:
+            if everything_ and target is None:
+                everything(ctx)
+                code = 0
+            elif target is None:
                 overview(ctx)
                 code = 0
             elif "/" in target or target.endswith((".c", ".h")) or "*" in target:

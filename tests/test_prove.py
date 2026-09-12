@@ -115,10 +115,16 @@ def test_prove_targets(repo: Path, monkeypatch, fake_cbmc) -> None:
     assert r.exit_code == 0 and "add" in r.output and "twice" in r.output and "waiting" in r.output
     r = CliRunner().invoke(app, ["status", "add"])
     assert r.exit_code == 0 and "attack score" in r.output
+    r = CliRunner().invoke(app, ["status", "-A"])
+    assert (
+        r.exit_code == 0 and "src/m.c" in r.output and "add" in r.output and "waiting" in r.output
+    )
     _scripted(repo, monkeypatch, "int add(int a, int b) { return a + b; }")
     r = CliRunner().invoke(app, ["prove", "add"])
     assert r.exit_code == 0, r.output
     assert fake_cbmc.calls == [["add"]]
+    r = CliRunner().invoke(app, ["status", "-A"])  # a verified function shows its contract
+    assert r.exit_code == 0 and "verified" in r.output and "int add(int a, int b);" in r.output
     r = CliRunner().invoke(app, ["prove", "src/m.c"])
     assert r.exit_code == 0 and fake_cbmc.calls[-1] == ["twice"]  # add is already verified
     r = CliRunner().invoke(app, ["prove", "does_not_exist"])
