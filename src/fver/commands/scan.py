@@ -72,6 +72,8 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
 
         # 3. target
         detected = detect_target(cfg.target.compiler)
+        if detected is not None:
+            ws.write_state("target", detected.__dict__)
         for w in compare_target(detected, ctx.target):
             log.warning(w)
 

@@ -45,7 +45,7 @@ def register(app: typer.Typer) -> None:
                 return
             c = summary.total_cost
             lines = [
-                f"[bold]{ctx.config.project.name}[/]  backend=[cyan]{backend}[/]  target=[cyan]{ctx.target.triple}[/]",
+                f"[bold]{ctx.ws.project_name}[/]  backend=[cyan]{backend}[/]  target=[cyan]{ctx.target.triple}[/]",
                 "",
                 "  ".join(
                     f"{styled_status(st)}: {summary.by_status.get(st, 0)}"

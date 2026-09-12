@@ -278,7 +278,7 @@ def next_functions(ctx: AppContext, limit: int | None = 10, file: str | None = N
 def status(ctx: AppContext) -> dict[str, Any]:
     s = ctx.ledger.summary(ctx.backend_name, ctx.target.key)
     d = asdict(s)
-    d["project"] = ctx.config.project.name
+    d["project"] = ctx.ws.project_name
     d["backend"] = ctx.backend_name
     d["target"] = ctx.target.key
     return d

@@ -122,7 +122,7 @@ def build_report(ledger: Ledger, backend: str, target_key: str, ws: Workspace | 
     ]
     return ReportData(
         generated_at=now_iso(),
-        project=ws.config.project.name if ws is not None else "",
+        project=ws.project_name if ws is not None else "",
         backend=backend,
         target_key=target_key,
         summary=ledger.summary(backend, target_key),

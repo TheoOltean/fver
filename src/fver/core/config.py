@@ -27,7 +27,8 @@ CONFIG_FILE_NAME = "config.toml"
 
 
 class ProjectConfig(BaseModel):
-    name: str = "project"
+    # Defaults to the repository directory's name.
+    name: str | None = None
     backend: str = "refinedc"
     property_class: str = "ub_free"
 
@@ -48,16 +49,24 @@ class BuildConfig(BaseModel):
 
 
 class TargetConfig(BaseModel):
-    triple: str = "x86_64-linux-gnu"
+    """The platform the proofs are for. Detected from the compiler at init and
+    scan; every key here is an override for cross-platform work."""
+
     compiler: str = "cc"
-    int_bits: int = 32
-    long_bits: int = 64
-    pointer_bits: int = 64
-    char_signed: bool = True
-    little_endian: bool = True
+    triple: str | None = None
+    int_bits: int | None = None
+    long_bits: int | None = None
+    pointer_bits: int | None = None
+    char_signed: bool | None = None
+    little_endian: bool | None = None
+
+    def apply(self, detected: Target) -> Target:
+        over = {k: v for k, v in self.model_dump().items() if v is not None}
+        return Target(**{**detected.__dict__, **over})
 
     def to_target(self) -> Target:
-        return Target(**self.model_dump())
+        """The overrides on top of the default target (no detection)."""
+        return self.apply(Target())
 
 
 class ModelConfig(BaseModel):
@@ -202,12 +211,18 @@ CONFIG_HEADER = """\
 # documents all of them.
 """
 
+ALWAYS_WRITTEN = (
+    "model.model",
+    "model.effort",
+    "budget.max_usd_per_run",
+    "budget.max_usd_per_function",
+)
+
 SECTION_COMMENTS = {
-    "project": "This project. The proof stack is RefinedC on Rocq; there is nothing to choose.",
+    "project": "Project name (defaults to the directory name).",
     "target": (
-        "The machine the proofs are for, detected from your C compiler. Proofs depend on\n"
-        "# integer widths, pointer size and char signedness, so they are recorded with every\n"
-        "# result. Change these only to verify for a different platform."
+        "Overrides for the platform the proofs are for (normally detected from the compiler\n"
+        "# and not written here). Set only to verify for a different platform."
     ),
     "build": (
         "How fver learns each file's compiler flags. Normally nothing is needed: at scan\n"
@@ -215,8 +230,9 @@ SECTION_COMMENTS = {
         "# projects, and fallback_flags otherwise. include/exclude choose which sources count."
     ),
     "model": (
-        "Which Claude model proves, and how hard it thinks. The API key belongs in\n"
-        "# ~/.fver/config.toml (`fver config set --user model.api_key ...`), never here."
+        "Which Claude model proves, and how hard it thinks (effort: low | medium | high |\n"
+        "# xhigh | max). API key: `fver config set --user model.api_key sk-ant-...` puts it in\n"
+        "# ~/.fver/config.toml, outside the repository. Do not write it here."
     ),
     "budget": "Money and attempt caps, per function and per run.",
     "verify": "Defaults for `fver verify`, `fver next` and `fver task`; flags override for one run.",
@@ -246,11 +262,14 @@ def dumps_config(cfg: FverConfig, minimal: bool = True) -> str:
     data = cfg.model_dump(mode="json")
     if not minimal:
         return tomli_w.dumps(_drop_none(data))
+    full = data
     data = _diff(FverConfig().model_dump(mode="json"), data)
-    # Always keep the project name so the file is self-describing. The backend
-    # is only written when it is not the stack (the null backend, for tests).
-    data.setdefault("project", {})
-    data["project"].setdefault("name", cfg.project.name)
+    # The few knobs a user is expected to touch are always present, so the
+    # file shows them even at their defaults. Everything else appears only
+    # when changed (`fver config set`), including the backend (null = tests).
+    for dotted in ALWAYS_WRITTEN:
+        sec, key = dotted.split(".")
+        data.setdefault(sec, {})[key] = full[sec][key]
     return _with_comments(tomli_w.dumps(_drop_none(data)))
 
 
@@ -261,6 +280,6 @@ def save_config(repo_root: Path, cfg: FverConfig) -> Path:
     return path
 
 
-def default_config_toml(project_name: str, backend: str = "refinedc") -> str:
+def default_config_toml(project_name: str | None = None, backend: str = "refinedc") -> str:
     cfg = FverConfig(project=ProjectConfig(name=project_name, backend=backend))
     return dumps_config(cfg)

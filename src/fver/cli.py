@@ -3,6 +3,7 @@
 fver setup     install every external tool (bear, cbmc, opam switch with RefinedC)
 fver init      create .fver/ in the current repository
 fver doctor    check external tools and API credentials
+fver prove     the one verb: index if needed, CBMC first, then prove (repo, file or function)
 fver scan      capture the build, index functions, run the backend front-end
 fver hunt      run bug finders (CBMC, Cerberus, sanitizers) over the code
 fver verify    run the LLM proof loop over unverified functions
@@ -33,6 +34,7 @@ _COMMAND_MODULES = [
     "fver.commands.init",
     "fver.commands.setup",
     "fver.commands.doctor",
+    "fver.commands.prove",
     "fver.commands.scan",
     "fver.commands.hunt",
     "fver.commands.verify",

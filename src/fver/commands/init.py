@@ -14,34 +14,10 @@ from fver.core.config import (
     CONFIG_FILE_NAME,
     FverConfig,
     ProjectConfig,
-    TargetConfig,
     save_config,
 )
 from fver.core.workspace import Workspace
 from fver.util.log import console
-
-
-def detect_target_config() -> TargetConfig:
-    compiler: str | None = None
-    try:
-        from fver.build.targets import detect_target
-        from fver.util.platform import find_compiler
-
-        compiler = find_compiler()
-        t = detect_target(compiler) if compiler else None
-    except Exception:  # module missing or compiler probe failed  # noqa: BLE001
-        t = None
-    if t is None:
-        return TargetConfig(compiler=compiler or "cc")
-    return TargetConfig(
-        triple=t.triple,
-        compiler=t.compiler,
-        int_bits=t.int_bits,
-        long_bits=t.long_bits,
-        pointer_bits=t.pointer_bits,
-        char_signed=t.char_signed,
-        little_endian=t.little_endian,
-    )
 
 
 def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Path:
@@ -52,25 +28,29 @@ def run_init(repo_root: Path, backend: str, name: str | None, force: bool) -> Pa
         console.print(f"[yellow]{cfg_path} already exists.[/] Use --force to overwrite the config.")
         raise typer.Exit(code=1)
     _build, notes = detect_build(repo_root)  # shown to the user; scan re-detects, nothing stored
-    cfg = FverConfig(
-        project=ProjectConfig(name=name or repo_root.name, backend=backend),
-        target=detect_target_config(),
-    )
+    cfg = FverConfig(project=ProjectConfig(name=name, backend=backend))
     ws = Workspace.create(repo_root, cfg)
     save_config(repo_root, cfg)
+    from fver.core.context import resolve_target
+
+    target = resolve_target(ws, cfg, redetect=True)
     # Documentation for whoever (or whatever) works here next: layout, every
     # command and option, every config key, the proving workflow.
     (ws.root / "GUIDE.md").write_text(render_docs(), encoding="utf-8")
     console.print(Panel.fit(f"Initialised [bold]{ws.root}[/]", title="fver init"))
-    console.print(f"  • proof stack: RefinedC on Rocq (target {cfg.target.triple})")
+    console.print(f"  • proof stack: RefinedC on Rocq, target {target.triple}")
+    console.print(
+        f"  • model {cfg.model.model} at effort {cfg.model.effort}; budget "
+        f"${cfg.budget.max_usd_per_run:.0f} per run, ${cfg.budget.max_usd_per_function:.0f} "
+        "per function (edit .fver/config.toml)"
+    )
+    console.print("  • API key (API mode only): fver config set --user model.api_key sk-ant-...")
     for n in notes:
         console.print(f"  • {n}")
     console.print("  • settings: .fver/config.toml (commented); everything else: .fver/GUIDE.md")
     console.print(
-        "\nNext steps:\n"
-        "  fver scan     capture the build and index functions\n"
-        "  fver hunt     run the bug finders\n"
-        "  fver verify   start proving"
+        "\nNext: fver prove            # the whole repository; or a file, or a function\n"
+        "      fver status           # what is proven"
     )
     return cfg_path
 

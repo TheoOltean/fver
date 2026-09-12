@@ -52,14 +52,33 @@ def claim_for_finding(
     )
 
 
-def run_hunt(ctx, only: list[str] | None, function: str | None, file: str | None) -> list[Finding]:
-    tus, functions = _load_index(ctx, function, file)
+def run_hunt(
+    ctx,
+    only: list[str] | None,
+    function: str | None,
+    file: str | None,
+    selected: list[FunctionInfo] | None = None,
+    quiet: bool = False,
+) -> list[Finding]:
+    if selected is not None:
+        functions = list(selected)
+        tus_by_id: dict[str, TranslationUnit] = {}
+        for f in functions:
+            if f.tu_id not in tus_by_id:
+                tu = ctx.ledger.get_tu(f.tu_id)
+                if tu is not None:
+                    tus_by_id[f.tu_id] = tu
+        tus = list(tus_by_id.values())
+    else:
+        tus, functions = _load_index(ctx, function, file)
     if not functions:
-        console.print("[yellow]No functions indexed.[/] Run `fver scan` first.")
+        if not quiet:
+            console.print("[yellow]No functions indexed.[/] Run `fver scan` first.")
         return []
     hunters = enabled_hunters(ctx.config.hunters, only)
     if not hunters:
-        console.print("[yellow]No such hunter.[/] Choose from: cbmc, sanitizers.")
+        if not quiet:
+            console.print("[yellow]No such hunter.[/] Choose from: cbmc, sanitizers.")
         return []
     by_id = {f.id: f for f in functions}
     run_id = ctx.ledger.start_run(

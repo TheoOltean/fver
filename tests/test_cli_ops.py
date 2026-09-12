@@ -43,12 +43,18 @@ def test_init_creates_layout_and_detects_makefile(repo):
     for needle in ("### `fver check`", "`--submission`", "[verify]", "next_limit", "## Goal"):
         assert needle in readme
     cfg = load_config(repo)
-    assert cfg.project.name == "proj" and cfg.project.backend == "refinedc"
+    assert cfg.project.name is None and ws.project_name == "proj"
+    assert cfg.project.backend == "refinedc"
+    # The file shows the few knobs a user touches, at their defaults, and nothing else.
+    text = (ws.root / "config.toml").read_text()
+    for key in ("effort", "max_usd_per_run", "max_usd_per_function", "api_key sk-ant"):
+        assert key in text, key
+    assert "[target]" not in text and "[project]" not in text
     # Nothing about the build is stored; scan detects it. The file is commented.
     assert cfg.build.capture_command is None and cfg.build.compile_commands is None
     text = (ws.root / "config.toml").read_text()
     assert text.startswith("# fver project configuration") and "[build]" not in text
-    assert 'backend = "refinedc"' not in text and "# The machine the proofs are for" in text
+    assert 'backend = "refinedc"' not in text and "# Which Claude model proves" in text
     assert "Makefile project" in r.output
     # user tree untouched apart from .fver
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]

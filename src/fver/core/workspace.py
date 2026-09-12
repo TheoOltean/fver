@@ -87,6 +87,10 @@ class Workspace:
         return self.root / CONFIG_FILE_NAME
 
     @property
+    def project_name(self) -> str:
+        return self.config.project.name or self.repo_root.name
+
+    @property
     def ledger_path(self) -> Path:
         return self.root / "ledger.sqlite"
 

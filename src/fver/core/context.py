@@ -17,6 +17,21 @@ from fver.core.workspace import Workspace
 from fver.ledger.api import Ledger, open_ledger
 
 
+def resolve_target(ws: Workspace, cfg: FverConfig, redetect: bool = False) -> Target:
+    """The platform the proofs are for: the cached detection in .fver/work
+    (made at init, refreshed by scan), a fresh detection when there is none,
+    then any overrides from [target] in config.toml."""
+    cached = None if redetect else ws.read_state("target")
+    if cached:
+        detected = Target(**cached)
+    else:
+        from fver.build.targets import detect_target
+
+        detected = detect_target(cfg.target.compiler) or Target(compiler=cfg.target.compiler)
+        ws.write_state("target", detected.__dict__)
+    return cfg.target.apply(detected)
+
+
 @dataclass
 class AppContext:
     ws: Workspace
@@ -31,7 +46,7 @@ class AppContext:
     ) -> AppContext:
         ws = Workspace.open(start)
         cfg = ws.config
-        target = cfg.target.to_target()
+        target = resolve_target(ws, cfg)
         ledger = open_ledger(ws.ledger_path)
         backend: Backend | None = None
         if need_backend:
