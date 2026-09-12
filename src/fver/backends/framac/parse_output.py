@@ -25,7 +25,7 @@ _PRINTED_GOAL = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 _KERNEL_ERROR = re.compile(
-    r"^\[kernel[^\]]*\] (?:[^\n]*?: )?(?:Failure|User Error|Error)[^\n]*$", re.MULTILINE
+    r"^\[(?:kernel|wp|rte)[^\]]*\] (?:[^\n]*?: )?(?:Failure|User Error|Error)[^\n]*$", re.MULTILINE
 )
 _MISSING_SPEC = re.compile(r"Neither code nor specification for function (\w+)")
 _NO_ASSIGNS = re.compile(r"Missing assigns clause \(assigns 'everything' instead\)")
@@ -74,7 +74,7 @@ def _kernel_errors(text: str) -> list[str]:
     for i, ln in enumerate(lines):
         if not _KERNEL_ERROR.match(ln):
             continue
-        if "treated as fatal error" in ln or "Frama-C aborted" in ln:
+        if "treated as fatal error" in ln or "aborted" in ln:
             continue
         block = [re.sub(r"^\[[^\]]*\] ", "", ln).strip()]
         j = i + 1

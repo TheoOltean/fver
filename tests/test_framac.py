@@ -42,6 +42,12 @@ WP_MISSING = """[kernel:annot:missing-spec] m.c:1: Warning:
 [wp] [Timeout] typed_call_assert_rte_signed_overflow (Alt-Ergo) (Cached)
 [wp] Proved goals:    2 / 3
 """
+WP_RANGE = """[kernel] Parsing t.c (with preprocessing)
+[wp] Running WP plugin...
+[wp] t.c:196: User Error: 
+  Invalid infinite range destination_0+(0..)
+[kernel] Plug-in wp aborted: invalid user input.
+"""
 WP_ERR = """[kernel] Parsing t.c (with preprocessing)
 [kernel:annot-error] t.c:20: Failure:
   unbound logic predicate \\valid_read_string. Ignoring logic specification of function first_is_a
@@ -62,6 +68,9 @@ def test_classify_outcomes() -> None:
     e = classify(WP_ERR, "", 1, False, "first_is_a")
     assert e.outcome is CheckOutcome.FRONTEND_ERROR and "valid_read_string" in e.feedback
     assert classify("", "", 0, True, "f").outcome is CheckOutcome.TOOL_ERROR
+    r = classify(WP_RANGE, "", 1, False, "f")
+    assert r.outcome is CheckOutcome.FRONTEND_ERROR and "Invalid infinite range" in r.feedback
+    assert "aborted" not in r.feedback
 
 
 ANNOTATED = """/*@ requires \\valid(p);
