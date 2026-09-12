@@ -24,7 +24,7 @@ def repo(tmp_path, monkeypatch):
     (d / "src" / "a.c").write_text("int f(void){return 1;}")
     (d / "Makefile").write_text("all:\n\tcc src/a.c\n")
     monkeypatch.chdir(d)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # ignore the user's real config
+    monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))  # ignore the user's real ~/.fver
     return d
 
 
@@ -64,7 +64,7 @@ def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch)
     d.mkdir()
     (d / "CMakeLists.txt").write_text("project(x C)")
     monkeypatch.chdir(d)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("FVER_HOME", str(tmp_path / "home"))
     assert runner.invoke(app, ["init"]).exit_code == 0
     assert load_config(d).build.compile_commands == "build/compile_commands.json"
     (d / "compile_commands.json").write_text("[]")

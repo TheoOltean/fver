@@ -164,7 +164,7 @@ def config_reference() -> str:
         "## Configuration\n"
         "\n"
         "Settings live in `.fver/config.toml` (commit it). Optional user-level defaults\n"
-        "in `~/.config/fver/config.toml` are merged underneath; put credentials such as\n"
+        "in `~/.fver/config.toml` are merged underneath; put credentials such as\n"
         "`model.api_key` there, never in the project file. Read and write with\n"
         "`fver config get <key>`, `fver config set <key> <value>` (`--user` for the\n"
         "user-level file) and `fver config show` (the effective merged configuration).\n"

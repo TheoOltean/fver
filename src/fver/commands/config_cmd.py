@@ -102,7 +102,7 @@ def config_set(
         False,
         "--user",
         "-u",
-        help="Write to the user-level config (~/.config/fver/config.toml) instead of the "
+        help="Write to the user-level config (~/.fver/config.toml) instead of the "
         "project's. Use this for credentials such as model.api_key.",
     ),
 ) -> None:

@@ -50,7 +50,8 @@ To pin a release instead of `main`, set `FVER_REF` (a tag or commit) before
 piping to `sh`, e.g. `FVER_REF=v0.1.0`. To upgrade, run the one-liner again.
 
 Credentials and model: fver calls the Anthropic API. Put the key in your
-user-level config (never committed) and pick the model there too:
+user-level config, `~/.fver/config.toml` (never committed), and pick the
+model there too:
 
 ```sh
 fver config set --user model.api_key sk-ant-...

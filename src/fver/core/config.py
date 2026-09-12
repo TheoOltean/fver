@@ -2,7 +2,8 @@
 
 Layout:
   <repo>/.fver/config.toml           project config (created by `fver init`)
-  $XDG_CONFIG_HOME/fver/config.toml  optional user defaults, merged underneath
+  ~/.fver/config.toml                user-level config (credentials, model), merged
+                                     underneath; FVER_HOME overrides the ~/.fver location
 
 Backend-specific settings live under [backend.<name>] and are passed to the
 backend untouched, so adding a backend never requires editing this file.
@@ -59,7 +60,7 @@ class TargetConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    # Credentials. Prefer the user-level config (~/.config/fver/config.toml,
+    # Credentials. Prefer the user-level config (~/.fver/config.toml,
     # `fver config set --user model.api_key sk-ant-...`) so the key never lands
     # in a committed project config. Falls back to ANTHROPIC_API_KEY /
     # ANTHROPIC_AUTH_TOKEN / an `ant auth login` profile when unset.
@@ -126,9 +127,13 @@ class FverConfig(BaseModel):
         return dict(self.backend.get(name or self.project.backend, {}))
 
 
+def user_home() -> Path:
+    """fver's own directory for the user: ~/.fver (or $FVER_HOME)."""
+    return Path(os.environ.get("FVER_HOME") or (Path.home() / CONFIG_DIR_NAME))
+
+
 def user_config_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "fver" / CONFIG_FILE_NAME
+    return user_home() / CONFIG_FILE_NAME
 
 
 def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
