@@ -226,7 +226,7 @@ class FramaCBackend:
             else:
                 base = ann.stub_definition(base, other.start_line, other.end_line)
         lines = base.split("\n")
-        new = annotated_fn.rstrip("\n").split("\n")
+        new = acsl.split_calls_declarations(annotated_fn.rstrip("\n")).split("\n")
         lines[task.function.start_line - 1 : task.function.end_line] = new
         out = "\n".join(lines)
         if declared:
@@ -247,7 +247,7 @@ class FramaCBackend:
             "-wp-par",
             "2",
             "-wp-print",
-            "-wp-prop=-@terminates",  # non-termination is not undefined behaviour
+            "-wp-prop=-@terminates,-@exits",  # neither non-termination nor exit() is UB
             "-warn-invalid-pointer",
             "-warn-left-shift-negative",
             "-warn-right-shift-negative",

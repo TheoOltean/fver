@@ -54,6 +54,38 @@ def body_annotations(annotated_fn_text: str) -> list[str]:
     return acsl_blocks(rest)
 
 
+_CALLS_LINE = re.compile(r"^(?P<indent>[ \t]*)//@\s*calls\b[^\n]*$")
+_LOCAL_DEF = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<type>(?:[A-Za-z_][\w ]*?\s*\**\s*)+?)\b(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<init>[^;]+;)\s*$"
+)
+
+
+def split_calls_declarations(fn_text: str) -> str:
+    """Frama-C cannot attach `//@ calls f;` to a local definition with an
+    initialiser (`T x = f();`). Rewrite that pair to `T x;` followed by the
+    annotation and `x = f();`, which means the same thing and is accepted.
+    Applied to the copy the checker sees, after the code-unchanged check."""
+    lines = fn_text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        m = _CALLS_LINE.match(ln)
+        if m and i + 1 < len(lines):
+            d = _LOCAL_DEF.match(lines[i + 1])
+            if d and not re.search(r"\bconst\b", d.group("type")) and "(" not in d.group("type"):
+                ind = d.group("indent")
+                ty = d.group("type").rstrip()
+                out.append(f"{ind}{ty}{'' if ty.endswith('*') else ' '}{d.group('name')};")
+                out.append(ln)
+                out.append(f"{ind}{d.group('name')} = {d.group('init')}")
+                i += 2
+                continue
+        out.append(ln)
+        i += 1
+    return "\n".join(out)
+
+
 def clauses(contract: str) -> list[str]:
     """`requires ...;` style clauses of an ACSL block, comment markers removed."""
     inner = re.sub(r"^\s*/\*@|\*/\s*$", "", contract.strip(), flags=re.DOTALL)
@@ -69,4 +101,5 @@ __all__ = [
     "leading_contract",
     "one_line",
     "remove_comments",
+    "split_calls_declarations",
 ]

@@ -89,6 +89,33 @@ For `while (*p)` string loops: `loop invariant 0 <= i <= strlen(s);` and
 `loop invariant \valid_read(s + (0 .. strlen(s)));` (from the precondition,
 restated so WP keeps it).
 
+## 3b. Calls through function pointers
+
+WP cannot reason about `p->fn(x)` or `table.fn(x)` unless told which
+functions the pointer may hold. Put a `calls` statement annotation on the
+line before the statement that makes the call, and a precondition that
+pins the pointer:
+
+```c
+/*@ requires \valid_read(hooks);
+    requires hooks->allocate == malloc;
+    assigns \nothing;
+    ensures \result == \null || \valid(\result);
+*/
+static void *alloc_one(const struct hooks *hooks) {
+  //@ calls malloc;
+  void *p = hooks->allocate(16);
+  return p;
+}
+```
+
+If the pointer may hold one of several functions, list them all:
+`//@ calls malloc, my_alloc;` with `requires hooks->allocate == malloc ||
+hooks->allocate == my_alloc;`. A global table (`global_hooks.deallocate`) is
+handled the same way, with the precondition on the global. The harness
+accepts `calls` before a declaration with an initialiser and rewrites it
+for Frama-C.
+
 ## 4. Quantifiers and logic
 
 `\forall integer k; 0 <= k < n ==> a[k] == 0;`, `\exists integer k; ...`,

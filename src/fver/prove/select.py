@@ -71,12 +71,16 @@ def order_with_dependencies(ctx: AppContext, selected: list[FunctionInfo]) -> li
     verified: dict[str, bool] = {}
 
     def skip(fn: FunctionInfo) -> bool:
-        """Verified callees need no work; unsupported ones cannot be helped."""
+        """Verified callees need no work; unsupported ones cannot be helped;
+        unresolved ones already failed and are retried only when named
+        (their callers are then blocked at no cost)."""
         if fn.id not in verified:
             claim = ctx.ledger.current_claim(fn.id, backend, tk)
             verified[fn.id] = claim is not None and claim.status in (
                 Status.VERIFIED,
                 Status.UNSUPPORTED,
+                Status.UNRESOLVED,
+                Status.BUG_FOUND,
             )
         return verified[fn.id]
 

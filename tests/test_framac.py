@@ -136,3 +136,16 @@ def test_guardrail_and_splice(tmp_path: Path) -> None:
     argv = b._check_argv(tmp_path / "a.c", tu, "clear")
     assert "-wp-rte" in argv and argv[argv.index("-wp-fct") + 1] == "clear"
     assert any(a.startswith("-cpp-extra-args=") and "-Iinc -DX=1" in a for a in argv)
+
+
+def test_calls_before_a_local_definition_is_split() -> None:
+    src = "int f(struct h *hooks) {\n  //@ calls malloc;\n  void *p = hooks->allocate(16);\n  return p != 0;\n}\n"
+    out = acsl.split_calls_declarations(src)
+    assert out == (
+        "int f(struct h *hooks) {\n  void *p;\n  //@ calls malloc;\n  p = hooks->allocate(16);\n"
+        "  return p != 0;\n}\n"
+    )
+    plain = "int g(void) {\n  int x = 1;\n  return x;\n}\n"
+    assert acsl.split_calls_declarations(plain) == plain
+    const = "int g(struct h *hooks) {\n  //@ calls malloc;\n  void *const p = hooks->allocate(1);\n  return 0;\n}\n"
+    assert acsl.split_calls_declarations(const) == const  # const locals are left alone
