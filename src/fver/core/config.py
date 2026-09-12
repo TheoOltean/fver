@@ -151,8 +151,17 @@ def load_config(repo_root: Path) -> FverConfig:
         data = _deep_merge(data, tomllib.loads(up.read_text(encoding="utf-8", errors="replace")))
     pp = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_NAME
     if pp.exists():
-        data = _deep_merge(data, tomllib.loads(pp.read_text(encoding="utf-8", errors="replace")))
+        project = tomllib.loads(pp.read_text(encoding="utf-8", errors="replace"))
+        data = _deep_merge(data, _drop_empty(project))
     return FverConfig.model_validate(data)
+
+
+def _drop_empty(obj: Any) -> Any:
+    """An empty string in the project file means 'not filled in': it must not
+    shadow a value from the user-level config."""
+    if isinstance(obj, dict):
+        return {k: _drop_empty(v) for k, v in obj.items() if v != ""}
+    return obj
 
 
 def _drop_none(obj: Any) -> Any:
@@ -190,6 +199,7 @@ CONFIG_HEADER = """\
 """
 
 ALWAYS_WRITTEN = (
+    "model.api_key",
     "model.model",
     "model.effort",
     "budget.max_usd_per_run",
@@ -208,9 +218,10 @@ SECTION_COMMENTS = {
         "# projects, and fallback_flags otherwise. include/exclude choose which sources count."
     ),
     "model": (
-        "Which Claude model proves, and how hard it thinks (effort: low | medium | high |\n"
-        "# xhigh | max). API key: `fver config set --user model.api_key sk-ant-...` puts it in\n"
-        "# ~/.fver/config.toml, outside the repository. Do not write it here."
+        "api_key: paste your Anthropic key, or leave empty and run\n"
+        "# `fver config set --user model.api_key sk-ant-...` to keep it in ~/.fver/config.toml,\n"
+        "# outside the repository (this file is meant to be committed). effort: low | medium |\n"
+        "# high | xhigh | max."
     ),
     "budget": "Money, attempt and size caps, per function and per run.",
     "hunters": "CBMC, run over each function before it is sent to the prover.",
@@ -246,7 +257,8 @@ def dumps_config(cfg: FverConfig, minimal: bool = True) -> str:
     # when changed (`fver config set`), including the backend (null = tests).
     for dotted in ALWAYS_WRITTEN:
         sec, key = dotted.split(".")
-        data.setdefault(sec, {})[key] = full[sec][key]
+        value = full[sec][key]
+        data.setdefault(sec, {})[key] = "" if value is None else value  # "" = fill me in
     return _with_comments(tomli_w.dumps(_drop_none(data)))
 
 

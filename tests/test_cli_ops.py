@@ -54,14 +54,19 @@ def test_init_creates_layout_and_detects_makefile(repo):
     assert cfg.project.backend == "refinedc"
     # The file shows the few knobs a user touches, at their defaults, and nothing else.
     text = (ws.root / "config.toml").read_text()
-    for key in ("effort", "max_usd_per_run", "max_usd_per_function", "api_key sk-ant"):
+    for key in ('api_key = ""', "effort", "max_usd_per_run", "max_usd_per_function"):
         assert key in text, key
+    # An unfilled key in the project file does not hide one set at user level.
+    assert (
+        runner.invoke(app, ["config", "set", "--user", "model.api_key", "sk-user"]).exit_code == 0
+    )
+    assert load_config(repo).model.api_key == "sk-user"
     assert "[target]" not in text and "[project]" not in text
     # Nothing about the build is stored; scan detects it. The file is commented.
     assert cfg.build.capture_command is None and cfg.build.compile_commands is None
     text = (ws.root / "config.toml").read_text()
     assert text.startswith("# fver project configuration") and "[build]" not in text
-    assert 'backend = "refinedc"' not in text and "# Which Claude model proves" in text
+    assert 'backend = "refinedc"' not in text and "# api_key: paste your Anthropic key" in text
     assert "Makefile project" in r.output
     # user tree untouched apart from .fver
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]
