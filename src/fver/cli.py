@@ -1,12 +1,9 @@
 """fver command-line entry point.
 
-fver setup     install every external tool
-fver init      create .fver/ in the current repository (rerun to refresh GUIDE.md)
-fver prove     index if needed, CBMC first, then prove: the repository, a file or a function
-fver status    what is proven, what is not, and why (a view on a terminal)
-fver config    get / set configuration values
-fver mcp       serve the session-mode protocol to Claude Code
-fver agent     the same protocol as plain commands (hidden)
+fver setup     install the proof toolchain
+fver init      create .fver/ in the current repository
+fver prove     prove the repository, a file or a function free of undefined behaviour
+fver status    what is proven, what is not, and why
 """
 
 from __future__ import annotations
@@ -19,7 +16,7 @@ from fver import __version__
 
 app = typer.Typer(
     name="fver",
-    help="LLM-driven formal verification of C: prove absence of undefined behaviour.",
+    help="Prove C code free of undefined behaviour, without touching it.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -29,9 +26,6 @@ _COMMAND_MODULES = [
     "fver.commands.init",
     "fver.commands.prove",
     "fver.commands.status",
-    "fver.commands.config_cmd",
-    "fver.commands.agent_cmds",
-    "fver.commands.mcp_cmd",
 ]
 
 
@@ -50,20 +44,8 @@ def _root(
     pass
 
 
-def _register_all() -> None:
-    for modname in _COMMAND_MODULES:
-        try:
-            mod = importlib.import_module(modname)
-        except ModuleNotFoundError as e:  # a command not yet implemented
-            if e.name == modname:
-                continue
-            raise
-        register = getattr(mod, "register", None)
-        if register is not None:
-            register(app)
-
-
-_register_all()
+for _modname in _COMMAND_MODULES:
+    importlib.import_module(_modname).register(app)
 
 
 def main() -> None:

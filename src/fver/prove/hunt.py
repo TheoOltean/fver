@@ -72,7 +72,7 @@ def run_hunt(
         tus, functions = _load_index(ctx, function, file)
     if not functions:
         if not quiet:
-            console.print("[yellow]No functions indexed.[/] Run `fver scan` first.")
+            console.print("[yellow]No functions indexed.[/]")
         return []
     hunters = [CbmcHunter()]
     by_id = {f.id: f for f in functions}
@@ -86,7 +86,7 @@ def run_hunt(
             workdir = ctx.ws.work_dir / "hunt" / h.name
             log.info("running %s over %d translation unit(s)", h.name, len(tus))
             try:
-                found = h.run(tus, functions, ctx.ws.repo_root, workdir, ctx.config.hunters)
+                found = h.run(tus, functions, ctx.ws.repo_root, workdir)
             except Exception as e:  # one hunter failing must not lose the others  # noqa: BLE001
                 ok = False
                 log.error("%s failed: %s", h.name, e)

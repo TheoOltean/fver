@@ -1,204 +1,231 @@
-"""`fver status`: summary of what is proven."""
+"""`fver status [FILE|FUNCTION]`: what is proven, what is not, and why.
+
+Like `git status`, a plain page: one line per file, or every function in a
+file, or one function in full. The code is indexed first if it never was or
+changed since.
+"""
 
 from __future__ import annotations
 
-import sys
+import fnmatch
+from collections import Counter
 
 import typer
-from rich.panel import Panel
 from rich.table import Table
 
 from fver.core.context import AppContext
 from fver.core.models import FunctionInfo, Status
-from fver.core.workspace import Workspace
+from fver.ledger.api import FunctionRow
 from fver.util.log import console, err_console, setup_logging
 
-STATUS_STYLE = {
-    Status.VERIFIED.value: "green",
-    Status.BUG_FOUND.value: "red",
-    Status.UNRESOLVED.value: "yellow",
-    Status.UNSUPPORTED.value: "dim",
-    Status.IN_PROGRESS.value: "cyan",
-    Status.NOT_ATTEMPTED.value: "white",
-    "stale": "magenta",
+STYLE = {
+    Status.VERIFIED: "green",
+    Status.BUG_FOUND: "red",
+    Status.UNRESOLVED: "yellow",
+    Status.UNSUPPORTED: "dim",
+    Status.STALE: "magenta",
+    Status.IN_PROGRESS: "cyan",
+    Status.NOT_ATTEMPTED: "white",
 }
+WORD = {
+    Status.VERIFIED: "verified",
+    Status.BUG_FOUND: "bug",
+    Status.UNRESOLVED: "unresolved",
+    Status.UNSUPPORTED: "unsupported",
+    Status.STALE: "stale",
+    Status.IN_PROGRESS: "in progress",
+    Status.NOT_ATTEMPTED: "waiting",
+}
+WAITING = (Status.NOT_ATTEMPTED, Status.STALE, Status.IN_PROGRESS)
 
 
-def styled_status(status: str) -> str:
-    return f"[{STATUS_STYLE.get(status, 'white')}]{status}[/]"
+def styled(status: Status) -> str:
+    return f"[{STYLE[status]}]{WORD[status]}[/]"
+
+
+def _rows(ctx: AppContext) -> list[FunctionRow]:
+    rows = ctx.ledger.list_functions(ctx.backend_name, ctx.target.key, order_by_attack_score=False)
+    return sorted(rows, key=lambda r: (r.function.source_path, r.function.start_line))
+
+
+def _unreadable(ctx: AppContext) -> dict[str, str]:
+    """source path -> preprocessor error, for files that could not be read."""
+    index = ctx.ws.read_state("index") or {}
+    by_id = {tu["id"]: tu["source_path"] for tu in index.get("tus", [])}
+    return {by_id[k]: v for k, v in index.get("preprocess_errors", {}).items() if k in by_id}
+
+
+def overview(ctx: AppContext) -> None:
+    rows = _rows(ctx)
+    unreadable = _unreadable(ctx)
+    by_file: dict[str, Counter[Status]] = {}
+    for r in rows:
+        by_file.setdefault(r.function.source_path, Counter())[r.status] += 1
+    for path in unreadable:
+        by_file.setdefault(path, Counter())
+    total: Counter[Status] = Counter()
+    for c in by_file.values():
+        total.update(c)
+    n = sum(total.values())
+    provable = n - total[Status.UNSUPPORTED]
+    waiting = sum(total[s] for s in WAITING)
+    cost = ctx.ledger.summary(ctx.backend_name, ctx.target.key).total_cost
+    console.print(
+        f"[bold]{ctx.ws.project_name}[/]: {n} functions, {provable} provable; "
+        f"[green]{total[Status.VERIFIED]} verified[/], "
+        f"[yellow]{total[Status.UNRESOLVED]} unresolved[/], "
+        f"[red]{total[Status.BUG_FOUND]} bugs[/], {waiting} waiting; ${cost.usd:.2f} spent."
+    )
+    if not by_file:
+        console.print("No C files found under the configured sources.")
+        return
+    t = Table(box=None, pad_edge=False, header_style="bold")
+    for col, just in (
+        ("file", "left"),
+        ("functions", "right"),
+        ("verified", "right"),
+        ("unresolved", "right"),
+        ("bugs", "right"),
+        ("waiting", "right"),
+        ("unsupported", "right"),
+        ("", "left"),
+    ):
+        t.add_column(col, justify=just)  # type: ignore[arg-type]
+    for path in sorted(by_file):
+        c = by_file[path]
+        note = "cannot read: " + unreadable[path].split(" | ")[0][:70] if path in unreadable else ""
+        fn = sum(c.values())
+        t.add_row(
+            path,
+            str(fn),
+            f"[green]{c[Status.VERIFIED]}[/]" if c[Status.VERIFIED] else "0",
+            f"[yellow]{c[Status.UNRESOLVED]}[/]" if c[Status.UNRESOLVED] else "0",
+            f"[red]{c[Status.BUG_FOUND]}[/]" if c[Status.BUG_FOUND] else "0",
+            str(sum(c[s] for s in WAITING)),
+            f"[dim]{c[Status.UNSUPPORTED]}[/]" if c[Status.UNSUPPORTED] else "0",
+            f"[red]{note}[/]",
+        )
+    console.print(t)
+    console.print("\n`fver status <file>` lists its functions; `fver status <function>` shows one.")
+
+
+def file_page(ctx: AppContext, pattern: str) -> int:
+    rows = [
+        r
+        for r in _rows(ctx)
+        if fnmatch.fnmatch(r.function.source_path, pattern)
+        or r.function.source_path.endswith(pattern)
+    ]
+    unreadable = _unreadable(ctx)
+    hit = {
+        p: e for p, e in unreadable.items() if fnmatch.fnmatch(p, pattern) or p.endswith(pattern)
+    }
+    if not rows and not hit:
+        err_console.print(f"[red]No indexed file matches '{pattern}'.[/]")
+        return 1
+    for path, err in hit.items():
+        console.print(f"[red]{path}: cannot read.[/] {err}")
+    t = Table(box=None, pad_edge=False, header_style="bold")
+    t.add_column("function")
+    t.add_column("line", justify="right")
+    t.add_column("status")
+    t.add_column("note")
+    for r in rows:
+        note = r.claim.message if r.claim else ""
+        t.add_row(r.function.name, str(r.function.start_line), styled(r.status), note[:100])
+    console.print(t)
+    return 0
+
+
+def function_page(ctx: AppContext, name: str) -> int:
+    matches = ctx.ledger.find_functions(name=name)
+    if not matches:
+        err_console.print(f"[red]No function named '{name}'.[/] (`fver status <file>` lists them.)")
+        return 1
+    if len(matches) > 1:
+        console.print(f"'{name}' is defined in several files:")
+        for m in matches:
+            console.print(f"  {m.source_path}:{m.start_line}")
+        console.print("Pass the file to `fver status` to see them.")
+        return 0
+    _detail(ctx, matches[0])
+    return 0
+
+
+def _detail(ctx: AppContext, fn: FunctionInfo) -> None:
+    from fver.prove import store
+
+    backend, tk = ctx.backend_name, ctx.target.key
+    claim = ctx.ledger.current_claim(fn.id, backend, tk)
+    status = claim.status if claim else Status.NOT_ATTEMPTED
+    console.print(f"[bold]{fn.name}[/]  {fn.source_path}:{fn.start_line}-{fn.end_line}")
+    console.print(f"  {fn.signature}")
+    console.print(
+        f"  status: {styled(status)}" + (f"  {claim.message}" if claim and claim.message else "")
+    )
+    console.print(
+        f"  attack score: {fn.attack_score:.2f}"
+        + (f"  ({', '.join(fn.attack_reasons)})" if fn.attack_reasons else "")
+    )
+    if fn.callees:
+        console.print(f"  calls: {', '.join(fn.callees)}")
+    deps = ctx.ledger.dependents(fn.name)
+    if deps:
+        console.print("  called by: " + ", ".join(f"{d.name} ({d.source_path})" for d in deps))
+
+    loaded = store.load_accepted(ctx.ws, fn.source_path, fn.name)
+    if loaded is not None:
+        sub, _record = loaded
+        console.print("\n[bold]Accepted contract[/] (the annotations above the function):")
+        for text in sub.files.values():
+            for line in text.splitlines():
+                if "rc::" in line:
+                    console.print("  " + line.strip())
+    if claim and claim.assumptions:
+        console.print("\n[bold]Trusted[/] (specs this proof relies on):")
+        for a in claim.assumptions:
+            console.print(f"  - {a}")
+
+    history = ctx.ledger.claims_for(fn.id)
+    if history:
+        console.print("\n[bold]History[/]")
+        for c in history:
+            console.print(
+                f"  {c.created_at[:19]}  {styled(c.status)}  ${c.cost.usd:.2f}  {c.message[:90]}"
+            )
+    findings = ctx.ledger.findings(function_id=fn.id)
+    if findings:
+        console.print("\n[bold]CBMC findings[/]")
+        for f in findings:
+            console.print(f"  line {f.line or '?'}: {f.kind} ({f.confidence}) {f.message[:90]}")
+    pdir = ctx.ws.proofs_dir / fn.source_path / fn.name
+    if pdir.exists() and any(pdir.iterdir()):
+        console.print(f"\nProof files: {pdir}")
 
 
 def register(app: typer.Typer) -> None:
     @app.command("status")
     def status(
-        function: str | None = typer.Argument(
-            None, help="Open on (or, off a terminal, print) one function.", show_default=False
+        target: str | None = typer.Argument(
+            None,
+            help="A file (or glob) for its functions, a function name for its details.",
+            show_default=False,
         ),
     ) -> None:
-        """What is proven, what is not, and why. Indexes the code first if needed. A browsable view on a terminal, a table otherwise."""
+        """What is proven, what is not, and why. Indexes the code first if needed."""
         from fver.commands.prove import refresh_index
 
         ctx = AppContext.load(need_backend=True)
         setup_logging(ctx.ws.logs_dir, run_name="status")
         try:
             refresh_index(ctx)
-        finally:
-            ctx.close()
-        if sys.stdout.isatty():
-            from fver.tui import run_status
-
-            run_status(Workspace.open().repo_root, select=function)
-            return
-        if function:
-            _show(function)
-            return
-        ctx = AppContext.load(need_backend=False)
-        try:
-            backend = ctx.backend_name
-            target_key = ctx.target.key
-            summary = ctx.ledger.summary(backend, target_key)
-            c = summary.total_cost
-            lines = [
-                f"[bold]{ctx.ws.project_name}[/]  backend=[cyan]{backend}[/]  target=[cyan]{ctx.target.triple}[/]",
-                "",
-                "  ".join(
-                    f"{styled_status(st)}: {summary.by_status.get(st, 0)}"
-                    for st in [s.value for s in Status]
-                ),
-                "",
-                (
-                    f"Functions: {summary.total_functions}   "
-                    f"Attack-weighted coverage: [bold]{summary.verified_weighted * 100:.1f}%[/]   "
-                    f"Findings: {summary.findings}"
-                ),
-                (
-                    f"Cost: ${c.usd:.2f}  ({c.llm_calls} LLM calls, "
-                    f"{c.input_tokens + c.cache_read_tokens + c.cache_write_tokens:,} in / "
-                    f"{c.output_tokens:,} out tokens, {c.checker_runs} checker runs)"
-                ),
-            ]
-            console.print(Panel("\n".join(lines), title="fver status", expand=False))
-
-            rows = ctx.ledger.list_functions(backend, target_key, limit=20)
-            if not rows:
-                console.print("No functions found.")
-                return
-            table = Table(title=f"Top {len(rows)} functions by attack score")
-            table.add_column("Function", style="bold")
-            table.add_column("Location")
-            table.add_column("Score", justify="right")
-            table.add_column("Status")
-            table.add_column("Note", overflow="fold", max_width=60)
-            for r in rows:
-                table.add_row(
-                    r.function.name,
-                    f"{r.function.source_path}:{r.function.start_line}",
-                    f"{r.function.attack_score:.2f}",
-                    styled_status(r.status.value),
-                    (r.claim.message if r.claim else "")[:120],
-                )
-            console.print(table)
-        finally:
-            ctx.close()
-
-
-def _resolve(ctx: AppContext, ident: str, file: str | None) -> FunctionInfo | None:
-    fn = ctx.ledger.get_function(ident)
-    if fn is not None:
-        return fn
-    matches = ctx.ledger.find_functions(name=ident, source_path=file)
-    if not matches:
-        err_console.print(
-            f"[red]No function named '{ident}'[/]" + (f" in {file}" if file else "") + "."
-        )
-        return None
-    if len(matches) > 1:
-        err_console.print(f"[yellow]'{ident}' is ambiguous; pass --file to pick one:[/]")
-        for m in matches:
-            err_console.print(f"  {m.source_path}:{m.start_line}  ({m.id})")
-        return None
-    return matches[0]
-
-
-def _show(ident: str, file: str | None = None) -> None:
-    if True:
-        ctx = AppContext.load(need_backend=False)
-        try:
-            fn = _resolve(ctx, ident, file)
-            if fn is None:
-                raise typer.Exit(code=1)
-            backend, target_key = ctx.backend_name, ctx.target.key
-            claim = ctx.ledger.current_claim(fn.id, backend, target_key)
-            status = claim.status.value if claim else "not_attempted"
-
-            console.print(f"[bold]{fn.name}[/]  {fn.source_path}:{fn.start_line}-{fn.end_line}")
-            console.print(f"  id: {fn.id}    tu: {fn.tu_id}    static: {fn.is_static}")
-            console.print(f"  signature: {fn.signature}")
-            console.print(f"  body hash: {fn.body_hash[:16]}")
-            console.print(
-                f"  attack score: {fn.attack_score:.2f}"
-                + (f"  ({', '.join(fn.attack_reasons)})" if fn.attack_reasons else "")
-            )
-            console.print(f"  callees: {', '.join(fn.callees) if fn.callees else '-'}")
-            console.print(
-                f"  status: {styled_status(status)}"
-                + (f"  {claim.message}" if claim and claim.message else "")
-            )
-
-            history = ctx.ledger.claims_for(fn.id)
-            if history:
-                t = Table(title="Claim history")
-                t.add_column("When")
-                t.add_column("Backend")
-                t.add_column("Status")
-                t.add_column("Cost", justify="right")
-                t.add_column("Message", overflow="fold", max_width=60)
-                for c in history:
-                    t.add_row(
-                        c.created_at,
-                        c.backend,
-                        styled_status(c.status.value),
-                        f"${c.cost.usd:.2f}",
-                        c.message[:200],
-                    )
-                console.print(t)
-
-            if claim and claim.assumptions:
-                console.print("[bold]Assumptions[/] (trusted specs / axioms this proof relies on):")
-                for a in claim.assumptions:
-                    console.print(f"  - {a}")
-            if claim and claim.proof_hash:
-                console.print(f"  proof hash: {claim.proof_hash}")
-
-            pdir = ctx.ws.proofs_dir / fn.source_path / fn.name
-            if pdir.exists() and any(pdir.iterdir()):
-                console.print(f"[bold]Proof directory[/]: {pdir}")
-                for p in sorted(pdir.rglob("*")):
-                    if p.is_file():
-                        console.print(f"  {p.relative_to(pdir)}  ({p.stat().st_size} bytes)")
+            if target is None:
+                overview(ctx)
+                code = 0
+            elif "/" in target or target.endswith((".c", ".h")) or "*" in target:
+                code = file_page(ctx, target)
             else:
-                console.print(f"[dim]No stored proof at {pdir}[/]")
-
-            findings = ctx.ledger.findings(function_id=fn.id)
-            if findings:
-                t = Table(title="Findings")
-                t.add_column("Line")
-                t.add_column("Kind")
-                t.add_column("Tool")
-                t.add_column("Message", overflow="fold", max_width=60)
-                for f in findings:
-                    t.add_row(str(f.line or ""), f.kind, f.tool, f.message)
-                console.print(t)
-
-            deps = ctx.ledger.dependents(fn.name)
-            if deps:
-                console.print(
-                    "[bold]Called by[/] (their proofs depend on this function's contract):"
-                )
-                for d in deps:
-                    dc = ctx.ledger.current_claim(d.id, backend, target_key)
-                    console.print(
-                        f"  {d.name}  {d.source_path}:{d.start_line}  {styled_status(dc.status.value if dc else 'not_attempted')}"
-                    )
+                code = function_page(ctx, target)
         finally:
             ctx.close()
+        raise typer.Exit(code)

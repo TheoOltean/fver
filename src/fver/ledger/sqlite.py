@@ -1,7 +1,7 @@
 """SQLite implementation of the Ledger protocol.
 
 This is the only module in fver that imports sqlite3. One connection per
-thread (WAL journal, busy timeout) so the agent loop can record claims from
+thread (WAL journal, busy timeout) so the proof loop can record claims from
 worker threads without coordination.
 """
 

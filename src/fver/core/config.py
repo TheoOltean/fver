@@ -1,11 +1,7 @@
-"""Configuration schema and loading.
+"""The one configuration file: <repo>/.fver/config.toml.
 
-One file per project: <repo>/.fver/config.toml, created by `fver init` and
-ignored by git (it holds the API key). Everything not written there takes
-the default below.
-
-Backend-specific settings live under [backend.<name>] and are passed to the
-backend untouched, so adding a backend never requires editing this file.
+Created by `fver init`, ignored by git (it holds the API key), edited by
+hand. Everything not written in it takes the default below.
 """
 
 from __future__ import annotations
@@ -18,52 +14,21 @@ from typing import Any
 import tomli_w
 from pydantic import BaseModel, Field
 
-from fver.core.models import Target
-
 CONFIG_DIR_NAME = ".fver"
 CONFIG_FILE_NAME = "config.toml"
 
 
 class ProjectConfig(BaseModel):
-    # Defaults to the repository directory's name.
-    name: str | None = None
-    backend: str = "refinedc"
+    backend: str = "refinedc"  # "null" only in fver's own tests
 
 
-class BuildConfig(BaseModel):
-    # Path to an existing compile_commands.json, relative to repo root.
-    compile_commands: str | None = None
-    # Or a shell command that produces one (run from repo root), e.g. "bear -- make -B" (needs bear).
-    capture_command: str | None = None
-    # Glob patterns (relative to repo root) selecting which sources to verify.
+class SourcesConfig(BaseModel):
+    """Which .c files to prove, as repo-relative globs. Exclude wins."""
+
     include: list[str] = Field(default_factory=lambda: ["**/*.c"])
     exclude: list[str] = Field(
         default_factory=lambda: ["**/test/**", "**/tests/**", "**/third_party/**", "**/vendor/**"]
     )
-    # Used when no compile_commands.json is available: every included .c file
-    # is compiled with these flags.
-    fallback_flags: list[str] = Field(default_factory=lambda: ["-std=c11"])
-
-
-class TargetConfig(BaseModel):
-    """The platform the proofs are for. Detected from the compiler at init and
-    scan; every key here is an override for cross-platform work."""
-
-    compiler: str = "cc"
-    triple: str | None = None
-    int_bits: int | None = None
-    long_bits: int | None = None
-    pointer_bits: int | None = None
-    char_signed: bool | None = None
-    little_endian: bool | None = None
-
-    def apply(self, detected: Target) -> Target:
-        over = {k: v for k, v in self.model_dump().items() if v is not None}
-        return Target(**{**detected.__dict__, **over})
-
-    def to_target(self) -> Target:
-        """The overrides on top of the default target (no detection)."""
-        return self.apply(Target())
 
 
 class ModelConfig(BaseModel):
@@ -74,7 +39,6 @@ class ModelConfig(BaseModel):
     model: str = "claude-fable-5-1"
     effort: str = "high"  # low | medium | high | xhigh | max
     max_tokens: int = 32000
-    # Cache the stable prompt prefix (backend docs, examples).
     prompt_caching: bool = True
     timeout_seconds: float = 1800.0
 
@@ -90,25 +54,11 @@ class BudgetConfig(BaseModel):
     parallelism: int = 2
 
 
-class HuntersConfig(BaseModel):
-    """CBMC, which `fver prove` runs over each function before proving it."""
-
-    cbmc_unwind: int = 8
-    cbmc_timeout_seconds: int = 300
-
-
 class FverConfig(BaseModel):
     project: ProjectConfig = Field(default_factory=ProjectConfig)
-    build: BuildConfig = Field(default_factory=BuildConfig)
-    target: TargetConfig = Field(default_factory=TargetConfig)
+    sources: SourcesConfig = Field(default_factory=SourcesConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
-    hunters: HuntersConfig = Field(default_factory=HuntersConfig)
-    # Free-form per-backend settings: config.backend["refinedc"]["refinedc_bin"]
-    backend: dict[str, dict[str, Any]] = Field(default_factory=dict)
-
-    def backend_settings(self, name: str | None = None) -> dict[str, Any]:
-        return dict(self.backend.get(name or self.project.backend, {}))
 
 
 def load_config(repo_root: Path) -> FverConfig:
@@ -154,10 +104,10 @@ def _diff(defaults: Any, current: Any) -> Any:
 
 CONFIG_HEADER = """\
 # fver configuration for this project. Not committed (.fver/.gitignore lists
-# it), so the API key lives here. Only settings that differ from the defaults
-# are written; `fver config` prints every setting with its effective value and
-# `fver config set <key> <value>` changes one. .fver/GUIDE.md documents them.
-"""
+# it), so the API key lives here. Only the settings you are expected to touch
+# are written; every other key and its default:
+#
+{defaults}"""
 
 ALWAYS_WRITTEN = (
     "model.api_key",
@@ -168,32 +118,19 @@ ALWAYS_WRITTEN = (
 )
 
 SECTION_COMMENTS = {
-    "project": "Project name (defaults to the directory name).",
-    "target": (
-        "Overrides for the platform the proofs are for (normally detected from the compiler\n"
-        "# and not written here). Set only to verify for a different platform."
-    ),
-    "build": (
-        "Normally nothing: fver reads the source directly with every header directory in\n"
-        "# the repository on the include path. If files fail to read because the build\n"
-        "# generates headers or defines macros, export the build's compile_commands.json\n"
-        "# and set compile_commands, or set capture_command. include/exclude pick the sources."
-    ),
     "model": (
         "api_key: your Anthropic key (or leave empty and export ANTHROPIC_API_KEY).\n"
         "# effort: low | medium | high | xhigh | max."
     ),
     "budget": "Money, attempt and size caps, per function and per run.",
-    "hunters": "CBMC, run over each function before it is sent to the prover.",
-    "backend": (
-        "Proof-checker settings. Tools are found in the opam switch `fver setup` creates;\n"
-        "# refinedc_bin / coqc_bin / dune_bin override that."
-    ),
+    "sources": "Which .c files to prove (repo-relative globs; exclude wins).",
 }
 
 
 def _with_comments(toml: str) -> str:
-    out: list[str] = [CONFIG_HEADER.rstrip("\n")]
+    defaults = tomli_w.dumps(_drop_none(FverConfig().model_dump(mode="json"))).rstrip()
+    defaults = "\n".join(f"#   {line}".rstrip() for line in defaults.splitlines())
+    out: list[str] = [CONFIG_HEADER.format(defaults=defaults).rstrip("\n")]
     for line in toml.splitlines():
         m = re.match(r"^\[([a-z_]+)", line)
         if m and m.group(1) in SECTION_COMMENTS:
@@ -204,18 +141,11 @@ def _with_comments(toml: str) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def dumps_config(cfg: FverConfig, minimal: bool = True) -> str:
-    """Serialise a config. `minimal` writes only values that differ from the
-    defaults, with explanatory comments; `fver config` prints the effective
-    configuration in full without them."""
-    data = cfg.model_dump(mode="json")
-    if not minimal:
-        return tomli_w.dumps(_drop_none(data))
-    full = data
-    data = _diff(FverConfig().model_dump(mode="json"), data)
-    # The few knobs a user is expected to touch are always present, so the
-    # file shows them even at their defaults. Everything else appears only
-    # when changed (`fver config set`), including the backend (null = tests).
+def dumps_config(cfg: FverConfig) -> str:
+    """The file `fver init` writes: the few knobs a user touches, always
+    present even at their defaults, plus anything else that differs."""
+    full = cfg.model_dump(mode="json")
+    data = _diff(FverConfig().model_dump(mode="json"), full)
     for dotted in ALWAYS_WRITTEN:
         sec, key = dotted.split(".")
         value = full[sec][key]
@@ -228,8 +158,3 @@ def save_config(repo_root: Path, cfg: FverConfig) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dumps_config(cfg), encoding="utf-8")
     return path
-
-
-def default_config_toml(project_name: str | None = None, backend: str = "refinedc") -> str:
-    cfg = FverConfig(project=ProjectConfig(name=project_name, backend=backend))
-    return dumps_config(cfg)

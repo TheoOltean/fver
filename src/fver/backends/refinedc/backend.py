@@ -49,7 +49,7 @@ from fver.backends.refinedc.parse_output import (
     extract_frontend_errors,
     strip_ansi,
 )
-from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit, sha256_text
+from fver.core.models import FunctionInfo, Target, TranslationUnit, sha256_text
 from fver.index.functions import extract_from_source
 from fver.util import platform as plat
 from fver.util.proc import run, version_of, which
@@ -146,28 +146,6 @@ class RefinedCBackend:
     def _run(self, argv: list[str], cwd: Path, timeout: float):
         with _TOOL_LOCK:
             return run(argv, cwd=cwd, timeout=timeout, env=self._env())
-
-    def doctor(self) -> list[ToolStatus]:
-        def status(label: str, binname: str, required: bool, hint: str) -> ToolStatus:
-            path = which(binname)
-            ver = _first_line(version_of([binname, "--version"])) if path else None
-            return ToolStatus(
-                name=label,
-                found=path is not None,
-                path=path,
-                version=ver or (path if path else None),
-                required=required,
-                hint=hint,
-            )
-
-        rows = [
-            status("refinedc", self.refinedc_bin, True, INSTALL_HINT),
-            status("coqc", self.coqc_bin, True, INSTALL_HINT),
-            status("dune", self.dune_bin, True, INSTALL_HINT),
-        ]
-        if not rows[1].found and which(facts.ROCQ_BIN):
-            rows[1] = status("coqc", facts.ROCQ_BIN, True, INSTALL_HINT)
-        return rows
 
     def tool_versions(self) -> dict[str, str]:
         if self._versions is None:

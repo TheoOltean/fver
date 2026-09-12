@@ -8,9 +8,8 @@
 
 Package installs go through the platform's package manager. The opam part
 follows RefinedC's README and takes 20 to 40 minutes the first time; every
-step is idempotent, so rerunning after a failure resumes. The absolute paths
-of the installed binaries are written to the user-level config, so nothing
-has to be added to PATH.
+step is idempotent, so rerunning after a failure resumes. fver runs the
+installed binaries from the switch directly, so nothing is added to PATH.
 """
 
 from __future__ import annotations
@@ -162,13 +161,17 @@ def run_setup() -> None:
             console.print(f"[bold]==>[/] {step.title}: already done", style="dim")
             continue
         _run(step)
-    console.print(f"\n[green]Toolchain installed[/] in {plat.switch_bin().parent}.")
-    from fver.core.doctor import collect_statuses, render
-
-    rows, _ = collect_statuses()
-    code = render(rows)
-    if code:
-        raise typer.Exit(code=code)
+    missing = [t for t in ("refinedc", "coqc", "dune") if not (plat.switch_bin() / t).exists()]
+    if missing or not shutil.which("cbmc"):
+        err_console.print(
+            f"[red]Setup did not finish:[/] missing {', '.join(missing + ([] if shutil.which('cbmc') else ['cbmc']))}. "
+            "Rerun `fver setup`."
+        )
+        raise typer.Exit(code=1)
+    console.print(
+        f"\n[green]Toolchain installed[/] in {plat.switch_bin().parent}. "
+        "Next: `fver init` inside a C repository."
+    )
 
 
 def register(app: typer.Typer) -> None:

@@ -1,24 +1,18 @@
-"""Tests for fver.index: compile_commands, preprocess, targets."""
+"""Tests for fver.index: sources, preprocess, targets."""
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 
 import pytest
 
-from fver.core.config import BuildConfig, FverConfig
+from fver.core.config import FverConfig, SourcesConfig
 from fver.core.models import Target, TranslationUnit
 from fver.core.workspace import Workspace
 from fver.index import targets
-from fver.index.compile_commands import (
-    capture_build,
-    is_included,
-    parse_compile_commands,
-    synthesise,
-)
 from fver.index.preprocess import preprocess_argv, preprocess_tu
+from fver.index.sources import header_dirs, is_included, list_sources
 from fver.util.proc import ProcResult
 
 FIXTURE = Path(__file__).parent / "fixtures" / "miniproj"
@@ -26,80 +20,28 @@ FIXTURE = Path(__file__).parent / "fixtures" / "miniproj"
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """Copy the fixture project and rewrite compile_commands directories to absolute."""
     dst = tmp_path / "miniproj"
     shutil.copytree(FIXTURE, dst)
-    cc = dst / "compile_commands.json"
-    entries = json.loads(cc.read_text())
-    for e in entries:
-        e["directory"] = str(dst)
-    cc.write_text(json.dumps(entries))
+    (dst / "compile_commands.json").unlink(missing_ok=True)
     return dst
 
 
 def test_include_exclude_globs() -> None:
-    b = BuildConfig()
+    b = SourcesConfig()
     assert is_included("src/a.c", b)
     assert is_included("a.c", b)
     assert not is_included("tests/x.c", b)
     assert not is_included("deep/tests/x.c", b)
     assert not is_included("third_party/lib/x.c", b)
-    b2 = BuildConfig(include=["src/net/*.c"])
+    b2 = SourcesConfig(include=["src/net/*.c"])
     assert is_included("src/net/p.c", b2)
     assert not is_included("src/util.c", b2)
-
-
-def test_parse_both_forms_filters_and_dedupes(repo: Path) -> None:
-    tus, warnings = parse_compile_commands(repo / "compile_commands.json", repo, BuildConfig())
-    paths = [t.source_path for t in tus]
-    assert paths == ["src/util.c", "src/net/parser.c"]  # tests/ excluded, duplicate dropped
-    util = tus[0]
-    assert util.arguments[0] == "clang" and "-Isrc" in util.arguments
-    parser = tus[1]
-    assert parser.arguments == [
-        "clang",
-        "-std=c11",
-        "-Isrc",
-        "-c",
-        "src/net/parser.c",
-        "-o",
-        "parser.o",
-    ]
-    assert util.id == TranslationUnit.make_id("src/util.c", util.arguments)
-    assert not warnings
-
-
-def test_capture_falls_back_to_synthesis(repo: Path) -> None:
-    (repo / "compile_commands.json").unlink()
-    cap = capture_build(repo, BuildConfig(fallback_flags=["-std=c99"]), compiler="cc")
-    assert cap.source == "source"
-    # the source is read directly: the file's own directory and every header dir are -I
-    argv = cap.tus[0].arguments
-    assert any(a.startswith("-I") for a in argv) and cap.warnings == []
-    assert sorted(t.source_path for t in cap.tus) == ["src/net/parser.c", "src/util.c"]
-    assert cap.tus[0].arguments[:2] == ["cc", "-std=c99"]
-
-
-def test_capture_uses_configured_path(repo: Path) -> None:
-    moved = repo / "out" / "cc.json"
-    moved.parent.mkdir()
-    (repo / "compile_commands.json").rename(moved)
-    cap = capture_build(repo, BuildConfig(compile_commands="out/cc.json"))
-    assert cap.source == "config"
-    assert len(cap.tus) == 2
-
-
-def test_capture_command_runs(repo: Path) -> None:
-    (repo / "compile_commands.json").rename(repo / "saved.json")
-    cap = capture_build(repo, BuildConfig(capture_command="cp saved.json compile_commands.json"))
-    assert cap.source.startswith("captured:")
-    assert len(cap.tus) == 2
 
 
 def test_synthesise_skips_hidden_dirs(repo: Path) -> None:
     (repo / ".hidden").mkdir()
     (repo / ".hidden" / "x.c").write_text("int x;")
-    tus = synthesise(repo, BuildConfig(), "clang")
+    tus = list_sources(repo, SourcesConfig(), "clang")
     assert all(".hidden" not in t.source_path for t in tus)
 
 
@@ -114,7 +56,7 @@ def test_preprocess_argv_strips_output_flags() -> None:
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not on PATH")
 def test_preprocess_with_real_compiler(repo: Path) -> None:
     ws = Workspace.create(repo, FverConfig())
-    tus, _ = parse_compile_commands(repo / "compile_commands.json", repo, BuildConfig())
+    tus = list_sources(repo, SourcesConfig(), "clang")
     tu = next(t for t in tus if t.source_path == "src/net/parser.c")
     err = preprocess_tu(ws, tu)
     assert err is None, err
@@ -176,7 +118,7 @@ def test_detect_target_missing_compiler(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_run_scan_end_to_end_without_backend(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The scan pipeline with an in-memory ledger and no backend: build capture,
+    """The scan pipeline with an in-memory ledger and no backend: source listing,
     extraction, callgraph, scoring, ledger upserts and the index file."""
     from types import SimpleNamespace
 
@@ -191,7 +133,7 @@ def test_run_scan_end_to_end_without_backend(repo: Path, monkeypatch: pytest.Mon
         ws=ws,
         config=cfg,
         ledger=ledger,
-        target=cfg.target.to_target(),
+        target=Target(),
         backend=None,
         backend_name="null",
     )
@@ -205,61 +147,10 @@ def test_run_scan_end_to_end_without_backend(repo: Path, monkeypatch: pytest.Mon
     assert "callgraph" in index and "externals" in index
     # nothing written outside .fver/
     written = {p for p in repo.rglob("*") if p.is_file() and not p.is_relative_to(ws.root)}
-    assert all(
-        p.is_relative_to(FIXTURE) or p.name in {"compile_commands.json"} or p.suffix in {".c", ".h"}
-        for p in written
-    )
-
-
-def test_capture_redirects_bear_output_into_work_dir(tmp_path):
-    from fver.index.compile_commands import _bear_with_output
-
-    out = tmp_path / "cc.json"
-    assert _bear_with_output("bear -- make", out) == f"bear --output {out} -- make"
-    assert _bear_with_output("bear --output x.json -- make", out) == "bear --output x.json -- make"
-    assert _bear_with_output("cmake -B build", out) == "cmake -B build"
-
-
-def test_capture_empty_result_falls_back_to_synthesis(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "a.c").write_text("int main(void){return 0;}\n")
-    work = repo / ".fver" / "work"
-    cap = capture_build(
-        repo,
-        BuildConfig(capture_command="echo '[]' > .fver/work/compile_commands.new.json"),
-        compiler="cc",
-        work_dir=work,
-    )
-    assert cap.source == "source"
-    assert any("empty" in w for w in cap.warnings)
-    assert not (repo / "compile_commands.json").exists()
-
-
-def test_capture_keeps_previous_good_capture_when_build_is_up_to_date(tmp_path):
-    import json as _json
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "a.c").write_text("int main(void){return 0;}\n")
-    work = repo / ".fver" / "work"
-    work.mkdir(parents=True)
-    good = [{"directory": str(repo), "arguments": ["cc", "-DX", "-c", "a.c"], "file": "a.c"}]
-    (work / "compile_commands.json").write_text(_json.dumps(good))
-    cap = capture_build(
-        repo,
-        BuildConfig(capture_command="echo '[]' > .fver/work/compile_commands.new.json"),
-        compiler="cc",
-        work_dir=work,
-    )
-    assert cap.source.startswith("captured(previous)")
-    assert [t.arguments for t in cap.tus] == [["cc", "-DX", "-c", "a.c"]]
-    assert not (work / "compile_commands.new.json").exists()
+    assert all(p.is_relative_to(FIXTURE) or p.suffix in {".c", ".h"} for p in written)
 
 
 def test_source_direct_include_path(tmp_path: Path) -> None:
-    from fver.index.compile_commands import header_dirs, synthesise
-
     root = tmp_path / "r"
     (root / "src" / "net").mkdir(parents=True)
     (root / "include").mkdir()
@@ -270,7 +161,7 @@ def test_source_direct_include_path(tmp_path: Path) -> None:
     (root / "include" / "api.h").write_text("")
     (root / ".git" / "x.h").write_text("")
     assert header_dirs(root) == ["include", "src/net"]
-    tus = {t.source_path: t.arguments for t in synthesise(root, BuildConfig(), "cc")}
+    tus = {t.source_path: t.arguments for t in list_sources(root, SourcesConfig(), "cc")}
     assert (
         tus["src/net/b.c"][-3:] == ["-Iinclude", "-c", "src/net/b.c"]
         or "-Isrc/net" in tus["src/net/b.c"]

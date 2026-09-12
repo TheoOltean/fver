@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from rich.panel import Panel
 
 from fver.core.config import (
     CONFIG_DIR_NAME,
@@ -14,9 +13,7 @@ from fver.core.config import (
     ProjectConfig,
     save_config,
 )
-from fver.core.guide import render_docs
 from fver.core.workspace import GITIGNORE_BODY, Workspace
-from fver.index.detect import detect_build
 from fver.util.log import console
 
 
@@ -25,38 +22,20 @@ def run_init(repo_root: Path, backend: str) -> Path:
         raise typer.BadParameter(f"{repo_root} is not a directory")
     cfg_path = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_NAME
     if cfg_path.exists():
-        # Already initialised: refresh the managed files, leave the config alone.
         ws = Workspace.open(repo_root)
-        (ws.root / "GUIDE.md").write_text(render_docs(), encoding="utf-8")
         (ws.root / ".gitignore").write_text(GITIGNORE_BODY, encoding="utf-8")
-        console.print(f"Already initialised: {ws.root}. Refreshed GUIDE.md; config untouched.")
+        console.print(f"Already initialised: {ws.root}")
         return cfg_path
-    _build, notes = detect_build(repo_root)  # shown to the user; scan re-detects, nothing stored
     cfg = FverConfig(project=ProjectConfig(backend=backend))
     ws = Workspace.create(repo_root, cfg)
     save_config(repo_root, cfg)
     from fver.core.context import resolve_target
 
-    target = resolve_target(ws, cfg, redetect=True)
-    # Documentation for whoever (or whatever) works here next: layout, every
-    # command and option, every config key, the proving workflow.
-    (ws.root / "GUIDE.md").write_text(render_docs(), encoding="utf-8")
-    console.print(Panel.fit(f"Initialised [bold]{ws.root}[/]", title="fver init"))
-    console.print(f"  • proof stack: RefinedC on Rocq, target {target.triple}")
-    console.print(
-        f"  • model {cfg.model.model} at effort {cfg.model.effort}; budget "
-        f"${cfg.budget.max_usd_per_run:.0f} per run, ${cfg.budget.max_usd_per_function:.0f} "
-        "per function"
-    )
-    for n in notes:
-        console.print(f"  • {n}")
-    console.print(
-        f"  • settings and API key: {cfg_path} (not committed); everything else: .fver/GUIDE.md"
-    )
-    console.print(
-        "\nNext: fver status           # index the code and show what is provable\n"
-        "      fver prove            # the whole repository; or a file, or a function"
-    )
+    target = resolve_target(ws, redetect=True)
+    console.print(f"Initialised {ws.root} (proofs for {target.triple}).")
+    console.print(f"Put your API key in {cfg_path} (git ignores it), then:")
+    console.print("  fver status    index the code; what is provable")
+    console.print("  fver prove     the whole repository, or a file, or a function")
     return cfg_path
 
 

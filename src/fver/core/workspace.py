@@ -6,11 +6,11 @@ proof files, the ledger, caches and logs are all under <repo>/.fver/.
 Layout
 ------
 .fver/
-  config.toml            project configuration (committed)
-  ledger.sqlite          verification ledger (committed or not; user's choice)
+  config.toml            configuration incl. the API key (ignored)
+  ledger.sqlite          verification ledger (committed)
   proofs/<src path>/<function>/   accepted submissions + audit results (committed)
   external/              trusted specs for libc / external functions (committed)
-  work/                  build capture, preprocessed TUs, function index (ignored)
+  work/                  preprocessed TUs, function index (ignored)
   backend/<name>/        the backend's private project directory (ignored)
   cache/                 content-addressed results (ignored)
   logs/                  run logs, LLM transcripts (ignored)
@@ -89,7 +89,7 @@ class Workspace:
 
     @property
     def project_name(self) -> str:
-        return self.config.project.name or self.repo_root.name
+        return self.repo_root.name
 
     @property
     def ledger_path(self) -> Path:

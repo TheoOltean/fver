@@ -22,7 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit
+from fver.core.models import FunctionInfo, Target, TranslationUnit
 
 
 class BackendToolMissing(RuntimeError):
@@ -134,10 +134,6 @@ class Backend(Protocol):
     """
 
     name: str
-
-    def doctor(self) -> list[ToolStatus]:
-        """Report which external tools are present."""
-        ...
 
     def tool_versions(self) -> dict[str, str]: ...
 

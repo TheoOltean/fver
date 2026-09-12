@@ -142,7 +142,7 @@ class Verifier:
     def build_task(self, function: FunctionInfo) -> FunctionTask:
         tu = self.ledger.get_tu(function.tu_id)
         if tu is None:
-            raise ValueError(f"translation unit {function.tu_id} not in ledger; run `fver scan`")
+            raise ValueError(f"translation unit {function.tu_id} not in ledger; run `fver status`")
         src_path = self.ws.repo_root / function.source_path
         source_text = src_path.read_text(encoding="utf-8", errors="replace")
         function = self._refresh_from_source(function, source_text)
@@ -275,10 +275,9 @@ class Verifier:
         cost: Cost,
         **claim_extra: Any,
     ) -> AttemptOutcome:
-        """Judge one submission for `task`. Shared by the API-driven loop and
-        the external-prover commands (`fver check`, MCP). Saves accepted
-        proofs and failed attempts to disk; returns claims without recording
-        them so the caller controls cost accounting and ordering."""
+        """Judge one submission for `task`. Saves accepted proofs and failed
+        attempts to disk; returns claims without recording them so the caller
+        controls cost accounting and ordering."""
         f = task.function
         violations = self._guardrail(submission)
         if violations:

@@ -151,9 +151,7 @@ def _task(backend, repo, tu, fn, callee_specs=None):
     )
 
 
-def test_doctor_and_versions(backend):
-    rows = {r.name: r for r in backend.doctor()}
-    assert rows["refinedc"].found and rows["coqc"].found and rows["dune"].found
+def test_tool_versions(backend):
     assert "refinedc" in backend.tool_versions()
 
 

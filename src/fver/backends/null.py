@@ -26,7 +26,7 @@ from fver.backends.base import (
     SubmissionSpec,
     TranslateResult,
 )
-from fver.core.models import FunctionInfo, Target, ToolStatus, TranslationUnit
+from fver.core.models import FunctionInfo, Target, TranslationUnit
 
 ACCEPT = "FVER_ACCEPT"
 GOALS = "FVER_GOALS"
@@ -47,10 +47,6 @@ class NullBackend:
 
     def _rec(self, method: str, **kw: Any) -> None:
         self.calls.append((method, kw))
-
-    def doctor(self) -> list[ToolStatus]:
-        self._rec("doctor")
-        return [ToolStatus(name="null", found=True, path="(builtin)", version="0", required=False)]
 
     def tool_versions(self) -> dict[str, str]:
         return {"null": "0"}

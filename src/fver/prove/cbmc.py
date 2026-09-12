@@ -9,10 +9,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from fver.core.config import HuntersConfig
-from fver.core.models import Finding, FunctionInfo, ToolStatus, TranslationUnit
+from fver.core.models import Finding, FunctionInfo, TranslationUnit
 from fver.util import proc
-from fver.util.platform import install_hint
 
 log = logging.getLogger(__name__)
 
@@ -128,7 +126,9 @@ CBMC_CHECKS = [
 ]
 
 MAX_FUNCTIONS_PER_TU = 20
-INSTALL_HINT = install_hint("cbmc", url="https://github.com/diffblue/cbmc/releases")
+INSTALL_HINT = "run `fver setup`"
+CBMC_UNWIND = 8  # loop unwinding bound
+CBMC_TIMEOUT_SECONDS = 300  # per entry point
 
 # (substring of property class or description, lower-case) -> kind
 _KIND_TABLE: list[tuple[str, str]] = [
@@ -338,26 +338,12 @@ def parse_cbmc_json(text: str, repo_root: Path, tu_dir: str | None = None) -> li
 class CbmcHunter:
     name = "cbmc"
 
-    def doctor(self) -> list[ToolStatus]:
-        path = proc.which("cbmc")
-        return [
-            ToolStatus(
-                name="cbmc",
-                found=path is not None,
-                path=path,
-                version=proc.version_of(["cbmc", "--version"]) if path else None,
-                required=True,
-                hint="run `fver setup`",
-            )
-        ]
-
     def run(
         self,
         tus: list[TranslationUnit],
         functions: list[FunctionInfo],
         repo_root: Path,
         workdir: Path,
-        config: HuntersConfig,
     ) -> list[Finding]:
         if proc.which("cbmc") is None:
             log.warning("cbmc not found on PATH; skipping (%s)", INSTALL_HINT)
@@ -382,8 +368,8 @@ class CbmcHunter:
                 entry_points = [f.name for f in ranked[:MAX_FUNCTIONS_PER_TU]]
             source_abs = str((repo_root / tu.source_path).resolve())
             for fn_name in entry_points:
-                argv = cbmc_argv(source_abs, flags, config.cbmc_unwind, fn_name)
-                r = proc.run(argv, cwd=Path(tu.directory), timeout=config.cbmc_timeout_seconds)
+                argv = cbmc_argv(source_abs, flags, CBMC_UNWIND, fn_name)
+                r = proc.run(argv, cwd=Path(tu.directory), timeout=CBMC_TIMEOUT_SECONDS)
                 tag = tu.id + ("" if fn_name is None else f"_{fn_name}")
                 (workdir / f"{tag}.json").write_text(r.stdout)
                 if r.timed_out:

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fver.backends.base import CheckOutcome, CheckResult, FunctionTask, Submission
-from fver.core.models import Cost
+from fver.core.models import Cost, Target
 from fver.prove import prompts
 from fver.prove.client import Completion
 from fver.prove.loop import HISTORY_KEEP, Conversation
@@ -16,7 +16,7 @@ def _task(tmp_path):
     return FunctionTask(
         function=use,
         tu=tu,
-        target=ws.config.target.to_target(),
+        target=Target(),
         repo_root=ws.repo_root,
         workdir=tmp_path / "wd",
         source_text=src,

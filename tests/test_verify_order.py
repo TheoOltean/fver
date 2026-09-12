@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fver.core.config import FverConfig
 from fver.core.context import AppContext
-from fver.core.models import Claim, FunctionInfo, PropertyClass, Status
+from fver.core.models import Claim, FunctionInfo, PropertyClass, Status, Target
 from fver.core.workspace import Workspace
 from fver.ledger.memory import InMemoryLedger
 from fver.prove.select import order_with_dependencies
@@ -31,7 +31,7 @@ def _ctx(tmp_path, fns):
     ws = Workspace.create(tmp_path / "repo", cfg)
     ledger = InMemoryLedger()
     ledger.upsert_functions(fns)
-    return AppContext(ws=ws, config=cfg, ledger=ledger, target=cfg.target.to_target(), backend=None)
+    return AppContext(ws=ws, config=cfg, ledger=ledger, target=Target(), backend=None)
 
 
 def test_callees_come_before_callers_and_priority_is_kept(tmp_path):

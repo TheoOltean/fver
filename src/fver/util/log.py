@@ -38,9 +38,7 @@ def setup_logging(
 ) -> logging.Logger:
     """Every command logs the same way: warnings and above to the terminal
     (`verbose` lowers that to debug), everything to one rotating file,
-    <repo>/.fver/logs/fver.log, tagged with the command name. Session-mode
-    commands and the MCP server pass console=False so nothing but the
-    protocol output reaches the terminal."""
+    <repo>/.fver/logs/fver.log, tagged with the command name."""
     root = logging.getLogger("fver")
     root.setLevel(logging.DEBUG)
     # Logger filters only see records logged to that logger itself, not to

@@ -17,19 +17,17 @@ from fver.core.workspace import Workspace
 from fver.ledger.api import Ledger, open_ledger
 
 
-def resolve_target(ws: Workspace, cfg: FverConfig, redetect: bool = False) -> Target:
-    """The platform the proofs are for: the cached detection in .fver/work
-    (made at init, refreshed by scan), a fresh detection when there is none,
-    then any overrides from [target] in config.toml."""
+def resolve_target(ws: Workspace, redetect: bool = False) -> Target:
+    """The platform the proofs are for, detected from the C compiler and
+    cached in .fver/work/target.json."""
     cached = None if redetect else ws.read_state("target")
     if cached:
-        detected = Target(**cached)
-    else:
-        from fver.index.targets import detect_target
+        return Target(**cached)
+    from fver.index.targets import detect_target
 
-        detected = detect_target(cfg.target.compiler) or Target(compiler=cfg.target.compiler)
-        ws.write_state("target", detected.__dict__)
-    return cfg.target.apply(detected)
+    detected = detect_target("cc") or Target(compiler="cc")
+    ws.write_state("target", detected.__dict__)
+    return detected
 
 
 @dataclass
@@ -46,14 +44,14 @@ class AppContext:
     ) -> AppContext:
         ws = Workspace.open(start)
         cfg = ws.config
-        target = resolve_target(ws, cfg)
+        target = resolve_target(ws)
         ledger = open_ledger(ws.ledger_path)
         backend: Backend | None = None
         if need_backend:
             from fver.backends.registry import make_backend
 
             name = backend_name or cfg.project.backend
-            backend = make_backend(name, ws.backend_dir(name), cfg.backend_settings(name), target)
+            backend = make_backend(name, ws.backend_dir(name), {}, target)
         return cls(ws=ws, config=cfg, ledger=ledger, target=target, backend=backend)
 
     @property

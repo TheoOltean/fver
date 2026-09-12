@@ -24,7 +24,7 @@ from fver.core.models import (
     Finding,
     FunctionInfo,
     Status,
-    ToolStatus,
+    Target,
     TranslationUnit,
     sha256_text,
 )
@@ -41,9 +41,6 @@ class FakeBackend:
         self.audit_fail = audit_fail
         self.tool_error = tool_error
         self.checks: list[Submission] = []
-
-    def doctor(self) -> list[ToolStatus]:
-        return [ToolStatus("fake", True)]
 
     def tool_versions(self) -> dict[str, str]:
         return {"fake": "1.0"}
@@ -248,9 +245,7 @@ def make_repo(
 
 
 def make_ctx(ws: Workspace, ledger: FakeLedger, backend: FakeBackend) -> AppContext:
-    return AppContext(
-        ws=ws, config=ws.config, ledger=ledger, target=ws.config.target.to_target(), backend=backend
-    )
+    return AppContext(ws=ws, config=ws.config, ledger=ledger, target=Target(), backend=backend)
 
 
 def sub(text: str, name: str = "function.c") -> str:

@@ -1,7 +1,7 @@
 """Domain model shared by every part of fver.
 
 Nothing in this module knows about any particular proof backend, build system
-or LLM. It is the vocabulary the CLI, the ledger, the agent and the backends
+or LLM. It is the vocabulary the CLI, the ledger, the proof loop and the backends
 use to talk to each other.
 """
 
@@ -52,12 +52,12 @@ class Target:
 
 @dataclass
 class TranslationUnit:
-    """One compiled C file with the exact flags the real build used."""
+    """One C file and the flags it is read with."""
 
     id: str
     source_path: str  # relative to repo root, posix separators
     directory: str  # working directory of the compile command
-    arguments: list[str]  # full compiler argv, as in compile_commands.json
+    arguments: list[str]  # full compiler argv
     preprocessed_path: str | None = None  # relative to workspace root
 
     @staticmethod
@@ -184,18 +184,7 @@ class Finding:
 
 
 # ---------------------------------------------------------------------------
-# Tool status (for `fver doctor`)
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class ToolStatus:
-    name: str
-    found: bool
-    path: str | None = None
-    version: str | None = None
-    required: bool = True
-    hint: str = ""  # how to install / fix
 
 
 def rel_posix(path: Path, root: Path) -> str:

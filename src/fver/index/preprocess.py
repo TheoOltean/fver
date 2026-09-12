@@ -1,5 +1,5 @@
-"""Preprocess each translation unit with the compiler and flags the real
-build used, keeping line markers so diagnostics map back to source."""
+"""Preprocess each translation unit, keeping line markers so diagnostics
+map back to source."""
 
 from __future__ import annotations
 
@@ -51,8 +51,6 @@ def preprocess_tu(ws: Workspace, tu: TranslationUnit, timeout: float = 300.0) ->
         return str(e)
     src = Path(tu.source_path)
     directory = Path(tu.directory)
-    # Ensure the source file is present in argv (it is, from compile_commands),
-    # but make it resolvable from the compile directory.
     if tu.source_path not in argv:
         abs_src = (ws.repo_root / src).resolve()
         argv.append(str(abs_src))

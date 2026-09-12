@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import pathlib
-
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from fver.cli import app
-from fver.commands import config_cmd
-from fver.core import doctor
-from fver.core import guide as docs_cmd
-from fver.core.config import FverConfig, HuntersConfig, load_config
+from fver.core.config import FverConfig, load_config
 from fver.core.models import Finding, FunctionInfo, Status, Target, TranslationUnit
 from fver.core.workspace import Workspace
 from fver.prove import hunt
-from fver.util import proc
 
 runner = CliRunner()
 
@@ -31,184 +26,40 @@ def repo(tmp_path, monkeypatch):
 # --- init ---------------------------------------------------------------
 
 
-def test_init_creates_layout_and_detects_makefile(repo):
+def test_init_creates_layout_and_config(repo):
     r = runner.invoke(app, ["init"])
     assert r.exit_code == 0, r.output
     ws = Workspace.open(repo)
     for d in ("proofs", "external", "work", "backend", "cache", "logs"):
         assert (ws.root / d).is_dir()
-    assert (ws.root / ".gitignore").exists()
-    # The workspace README documents every command, every config key and the workflow.
-    readme = (ws.root / "GUIDE.md").read_text()
-    for needle in (
-        "### `fver prove`",
-        "### `fver agent check`",
-        "`--submission`",
-        "[budget]",
-        "## Goal",
-    ):
-        assert needle in readme
+    assert "config.toml" in (ws.root / ".gitignore").read_text()
     cfg = load_config(repo)
-    assert cfg.project.name is None and ws.project_name == "proj"
-    assert cfg.project.backend == "refinedc"
-    # The file shows the few knobs a user touches, at their defaults, and nothing else.
+    assert cfg.project.backend == "refinedc" and ws.project_name == "proj"
+    # The file shows the few knobs a user touches, at their defaults, with every
+    # other key and its default in the header comment.
     text = (ws.root / "config.toml").read_text()
     for key in ('api_key = ""', "effort", "max_usd_per_run", "max_usd_per_function"):
         assert key in text, key
-    # An unfilled key counts as unset; the file is not committed, so a key may go in it.
-    assert load_config(repo).model.api_key is None
-    assert "config.toml" in (ws.root / ".gitignore").read_text()
-    assert runner.invoke(app, ["config", "set", "model.api_key", "sk-here"]).exit_code == 0
-    assert load_config(repo).model.api_key == "sk-here"
-    assert "[target]" not in text and "[project]" not in text
-    # Nothing about the build is stored; scan detects it. The file is commented.
-    assert cfg.build.capture_command is None and cfg.build.compile_commands is None
-    text = (ws.root / "config.toml").read_text()
-    assert text.startswith("# fver configuration for this project") and "[build]" not in text
-    assert 'backend = "refinedc"' not in text and "# api_key: your Anthropic key" in text
-    assert "source: read directly" in r.output
+    assert text.startswith("# fver configuration for this project")
+    assert "#   max_attempts_per_function = 8" in text and "\n[project]" not in text
+    assert cfg.model.api_key is None  # "" counts as unset
     # user tree untouched apart from .fver
     assert sorted(p.name for p in repo.iterdir()) == [".fver", "Makefile", "src"]
+    # A second init leaves the config alone.
+    (ws.root / "config.toml").write_text(text.replace('api_key = ""', 'api_key = "sk-x"'))
+    assert runner.invoke(app, ["init"]).exit_code == 0
+    assert load_config(repo).model.api_key == "sk-x"
 
 
-def test_config_show_and_validation(repo):
+def test_init_with_null_backend_and_bad_config_values(repo):
     assert runner.invoke(app, ["init", "--backend", "null"]).exit_code == 0
     assert load_config(repo).project.backend == "null"
-    r = runner.invoke(app, ["config", "set", "budget.max_attempts_per_function", "many"])
-    assert r.exit_code != 0
-    assert load_config(repo).budget.max_attempts_per_function == 8
-    r = runner.invoke(app, ["config"])
-    assert r.exit_code == 0, r.output
-    assert str(repo / ".fver" / "config.toml") in r.output and "[project]" in r.output
-    assert runner.invoke(app, ["config", "set", "budget.max_usd_per_run", "50"]).exit_code == 0
-    project = (repo / ".fver" / "config.toml").read_text()
-    assert "max_usd_per_run = 50" in project and project.count("\n\n\n") == 0
-
-
-def test_init_detects_cmake_and_existing_compile_commands(tmp_path, monkeypatch):
-    d = tmp_path / "cm"
-    d.mkdir()
-    (d / "CMakeLists.txt").write_text("project(x C)")
-    monkeypatch.chdir(d)
-    from fver.core.config import BuildConfig
-    from fver.index.detect import detect_build, resolve_build
-
-    r = runner.invoke(app, ["init"])
-    assert r.exit_code == 0 and "source: read directly" in r.output
-    assert detect_build(d)[0].compile_commands is None
-    (d / "compile_commands.json").write_text("[]")
-    assert detect_build(d)[0].compile_commands == "compile_commands.json"
-    # A configured source of flags wins over detection; include/exclude survive a detection.
-    chosen = BuildConfig(capture_command="bear -- ninja", include=["lib/**/*.c"])
-    assert resolve_build(d, chosen)[0] == chosen
-    auto, _ = resolve_build(d, BuildConfig(include=["lib/**/*.c"]))
-    assert auto.compile_commands == "compile_commands.json" and auto.include == ["lib/**/*.c"]
-
-
-# --- config -------------------------------------------------------------
-
-
-def test_config_set_roundtrip(repo):
-    runner.invoke(app, ["init"])
-    assert 'effort = "high"' in runner.invoke(app, ["config"]).output
-    r = runner.invoke(app, ["config", "set", "model.effort", "xhigh"])
-    assert r.exit_code == 0, r.output
-    assert load_config(repo).model.effort == "xhigh"
-    assert runner.invoke(app, ["config", "set", "hunters.cbmc_unwind", "12"]).exit_code == 0
-    assert load_config(repo).hunters.cbmc_unwind == 12
-    assert runner.invoke(app, ["config", "set", "budget.max_functions_per_run", "5"]).exit_code == 0
-    assert load_config(repo).budget.max_functions_per_run == 5
-    assert (
-        runner.invoke(app, ["config", "set", "budget.max_usd_per_function", "2.5"]).exit_code == 0
+    cfg_path = repo / ".fver" / "config.toml"
+    cfg_path.write_text(
+        cfg_path.read_text().replace("max_usd_per_run = 200.0", 'max_usd_per_run = "many"')
     )
-    assert load_config(repo).budget.max_usd_per_function == 2.5
-    assert runner.invoke(app, ["config", "set", "build.include", '["src/**/*.c"]']).exit_code == 0
-    assert load_config(repo).build.include == ["src/**/*.c"]
-    # bare strings and backend tables
-    assert (
-        runner.invoke(app, ["config", "set", "backend.refinedc.refinedc_bin", "/opt/rc"]).exit_code
-        == 0
-    )
-    assert load_config(repo).backend_settings("refinedc")["refinedc_bin"] == "/opt/rc"
-    # validation errors are reported, config unchanged
-    r = runner.invoke(app, ["config", "set", "budget.max_attempts_per_function", "many"])
-    assert r.exit_code != 0
-    assert load_config(repo).budget.max_attempts_per_function == 8
-
-
-def test_init_again_refreshes_the_guide_and_keeps_the_config(repo):
-    assert runner.invoke(app, ["init"]).exit_code == 0
-    assert runner.invoke(app, ["config", "set", "budget.max_usd_per_run", "7"]).exit_code == 0
-    guide = repo / ".fver" / "GUIDE.md"
-    guide.write_text("stale")
-    r = runner.invoke(app, ["init"])
-    assert r.exit_code == 0 and "Refreshed GUIDE.md" in r.output
-    assert guide.read_text() == docs_cmd.render_docs()
-    assert load_config(repo).budget.max_usd_per_run == 7
-
-
-def test_prover_workflow_matches_claude_skill():
-    """The skill shipped for Claude Code and the workflow written into .fver/GUIDE.md
-    must say the same thing."""
-    skill = pathlib.Path(__file__).resolve().parents[1] / ".claude" / "skills" / "fver" / "SKILL.md"
-    if not skill.exists():
-        pytest.skip("skill file not in this checkout")
-    body = skill.read_text().split("---", 2)[2].lstrip()
-    assert body == docs_cmd.PROVER_WORKFLOW
-
-
-def test_parse_value():
-    assert config_cmd.parse_value("true") is True
-    assert config_cmd.parse_value("3") == 3
-    assert config_cmd.parse_value('"x"') == "x"
-    assert config_cmd.parse_value("plain words") == "plain words"
-
-
-# --- clean --------------------------------------------------------------
-
-
-# --- doctor -------------------------------------------------------------
-
-
-def test_doctor_exit_codes(repo, monkeypatch):
-    runner.invoke(app, ["init", "--backend", "null"])
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.setattr(proc, "which", lambda n: None)
-    rows0, _ = doctor.collect_statuses()
-    assert any(x.required and not x.found for x in rows0)
-    assert doctor.render(rows0) == 1
-    monkeypatch.setattr(proc, "which", lambda n: f"/usr/bin/{n}")
-    monkeypatch.setattr(
-        proc, "run", lambda argv, **kw: proc.ProcResult(argv, 0, "tool 1.0\n", "", 0.0)
-    )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    rows, _ = doctor.collect_statuses()
-    # the null backend may or may not be implemented yet; ignore backend rows
-    required_missing = [
-        x for x in rows if x.required and not x.found and not x.name.startswith("backend")
-    ]
-    assert required_missing == [], required_missing
-    assert any(x.name == "anthropic credentials" and x.found for x in rows)
-
-
-def test_credential_status_via_ant(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.setattr(proc, "which", lambda n: "/usr/bin/ant" if n == "ant" else None)
-    monkeypatch.setattr(
-        proc,
-        "run",
-        lambda argv, **kw: proc.ProcResult(argv, 0, "Active profile: default\n", "", 0.0),
-    )
-    assert doctor.credential_status().found
-    monkeypatch.setattr(
-        proc, "run", lambda argv, **kw: proc.ProcResult(argv, 1, "Not logged in\n", "", 0.0)
-    )
-    assert not doctor.credential_status().found
-
-
-# --- hunt ---------------------------------------------------------------
+    with pytest.raises(ValidationError):
+        load_config(repo)
 
 
 class FakeLedger:
@@ -260,7 +111,6 @@ class FakeCtx:
         self.ws = ws
         self.ledger = ledger
         self.config = FverConfig()
-        self.config.hunters = HuntersConfig()
         self.target = Target()
         self.backend_name = "null"
 
@@ -268,10 +118,7 @@ class FakeCtx:
 class FakeHunter:
     name = "cbmc"
 
-    def doctor(self):
-        return []
-
-    def run(self, tus, functions, repo_root, workdir, config):
+    def run(self, tus, functions, repo_root, workdir):
         return [
             Finding(functions[0].id, functions[0].source_path, 12, "out_of_bounds", "cbmc", "oob"),
             Finding(
@@ -333,15 +180,3 @@ def test_log_records_from_child_loggers_carry_the_command_tag(tmp_path):
         h.flush()
     text = (tmp_path / LOG_FILE).read_text()
     assert "[prove] fver.some.child: hello from a child" in text
-
-
-def test_doctor_checks_the_proof_stack_outside_a_project(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # no .fver/ anywhere above
-    monkeypatch.setattr(proc, "which", lambda n: f"/usr/bin/{n}")
-    monkeypatch.setattr(
-        proc, "run", lambda argv, **kw: proc.ProcResult(argv, 0, "tool 1.0\n", "", 0.0)
-    )
-    rows, err = doctor.collect_statuses()
-    names = {x.name for x in rows}
-    assert {"refinedc", "coqc", "dune"} <= names and "backend" not in names
-    assert all(x.found for x in rows if x.name in ("refinedc", "coqc", "dune"))

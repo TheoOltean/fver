@@ -316,12 +316,6 @@ def test_registry_loads_both_backends(tmp_path: Path):
     assert rc.name == "refinedc" and nb.name == "null"
 
 
-def test_doctor_rows_are_labelled(backend: RefinedCBackend):
-    statuses = {s.name: s for s in backend.doctor()}
-    assert set(statuses) == {"refinedc", "coqc", "dune"}
-    assert not statuses["refinedc"].found and "fver setup" in statuses["refinedc"].hint
-
-
 def test_paths_are_coq_identifiers(backend: RefinedCBackend, task: FunctionTask):
     d = backend._tu_dir(task.tu)
     assert d.name == "tu_0c39be4cc5fb9ec6"

@@ -45,7 +45,7 @@ class QuietHunter:
     def doctor(self):
         return []
 
-    def run(self, tus, functions, repo_root, workdir, config):
+    def run(self, tus, functions, repo_root, workdir):
         QuietHunter.calls.append([f.name for f in functions])
         return [
             Finding(
@@ -110,7 +110,11 @@ def test_prove_indexes_hunts_then_proves(repo: Path, monkeypatch, fake_cbmc) -> 
 def test_prove_targets(repo: Path, monkeypatch, fake_cbmc) -> None:
     r = CliRunner().invoke(app, ["status"])
     assert r.exit_code == 0, r.output
-    assert "Indexing" in r.output and "add" in r.output and fake_cbmc.calls == []
+    assert "Indexing" in r.output and "2 provable" in r.output and fake_cbmc.calls == []
+    r = CliRunner().invoke(app, ["status", "src/m.c"])
+    assert r.exit_code == 0 and "add" in r.output and "twice" in r.output and "waiting" in r.output
+    r = CliRunner().invoke(app, ["status", "add"])
+    assert r.exit_code == 0 and "attack score" in r.output
     _scripted(repo, monkeypatch, "int add(int a, int b) { return a + b; }")
     r = CliRunner().invoke(app, ["prove", "add"])
     assert r.exit_code == 0, r.output

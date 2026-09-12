@@ -1,5 +1,5 @@
 from fver.backends.base import CheckOutcome, CheckResult, FunctionTask, Submission
-from fver.core.models import Status
+from fver.core.models import Status, Target
 from fver.prove import store
 from tests.test_agent_fakes import make_repo
 
@@ -8,7 +8,7 @@ def _task(ws, ledger, fn):
     return FunctionTask(
         function=fn,
         tu=ledger.get_tu(fn.tu_id),
-        target=ws.config.target.to_target(),
+        target=Target(),
         repo_root=ws.repo_root,
         workdir=ws.work_dir,
         source_text="",

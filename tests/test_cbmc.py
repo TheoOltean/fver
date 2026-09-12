@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from fver.core.config import HuntersConfig
 from fver.core.models import FunctionInfo, TranslationUnit
 from fver.prove import cbmc
 from fver.util import proc
@@ -120,14 +119,14 @@ def test_cbmc_run_per_function_when_no_main(tmp_path, monkeypatch):
     monkeypatch.setattr(proc, "which", lambda n: "/usr/bin/cbmc")
     monkeypatch.setattr(proc, "run", fake_run)
     tu = _tu(repo)
-    findings = cbmc.CbmcHunter().run(
-        [tu], _functions(), repo, tmp_path / "work", HuntersConfig(cbmc_unwind=3)
-    )
+    findings = cbmc.CbmcHunter().run([tu], _functions(), repo, tmp_path / "work")
     # two functions, no main -> two invocations, highest attack score first
     assert len(calls) == 2
     assert calls[0][-2:] == ["--function", "copy"]
     assert calls[1][-2:] == ["--function", "add"]
-    assert "--unwind" in calls[0] and calls[0][calls[0].index("--unwind") + 1] == "3"
+    assert "--unwind" in calls[0] and calls[0][calls[0].index("--unwind") + 1] == str(
+        cbmc.CBMC_UNWIND
+    )
     assert "-Isrc" in calls[0] and "-O2" not in calls[0]
     assert len(findings) == 6  # 3 failures x 2 runs
     assert findings[0].function_id == "tu1:copy" and findings[0].kind == "out_of_bounds"
@@ -148,30 +147,18 @@ def test_cbmc_uses_main_when_present(tmp_path, monkeypatch):
     fns = _functions() + [
         FunctionInfo("tu1:main", "main", "tu1", "src/buf.c", 30, 40, "int main(void)", "h3")
     ]
-    cbmc.CbmcHunter().run([_tu(repo)], fns, repo, tmp_path / "work", HuntersConfig())
+    cbmc.CbmcHunter().run([_tu(repo)], fns, repo, tmp_path / "work")
     assert len(calls) == 1 and "--function" not in calls[0]
 
 
 def test_cbmc_absent_and_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(proc, "which", lambda n: None)
-    assert (
-        cbmc.CbmcHunter().run(
-            [_tu(tmp_path)], _functions(), tmp_path, tmp_path / "w", HuntersConfig()
-        )
-        == []
-    )
-    st = cbmc.CbmcHunter().doctor()[0]
-    assert not st.found and "fver setup" in st.hint
+    assert cbmc.CbmcHunter().run([_tu(tmp_path)], _functions(), tmp_path, tmp_path / "w") == []
     monkeypatch.setattr(proc, "which", lambda n: "/usr/bin/cbmc")
     monkeypatch.setattr(
         proc, "run", lambda argv, **kw: proc.ProcResult(argv, -1, "", "", 1.0, timed_out=True)
     )
-    assert (
-        cbmc.CbmcHunter().run(
-            [_tu(tmp_path)], _functions(), tmp_path, tmp_path / "w", HuntersConfig()
-        )
-        == []
-    )
+    assert cbmc.CbmcHunter().run([_tu(tmp_path)], _functions(), tmp_path, tmp_path / "w") == []
 
 
 @pytest.mark.parametrize(

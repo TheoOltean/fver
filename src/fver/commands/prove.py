@@ -9,7 +9,6 @@ the configured budget.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -66,12 +65,12 @@ def select_functions(ctx: AppContext, targets: list[str], limit: int | None) -> 
 
 
 def refresh_index(ctx: AppContext) -> bool:
-    """Run a scan when there is no index yet or sources changed since the last
-    one. Returns True if a scan ran."""
-    from fver.index.scan import run_scan
-    from fver.prove.protocol import _modified_files
+    """Index when there is no index yet or a .c/.h file changed since the
+    last one. Returns True if it ran."""
+    from fver.index.scan import run_scan, sources_fingerprint
 
-    if ctx.ws.state_path("index").exists() and not _modified_files(ctx):
+    index = ctx.ws.read_state("index")
+    if index and index.get("fingerprint") == sources_fingerprint(ctx.ws):
         return False
     console.print("[bold]Indexing[/] (sources changed or no index yet) ...")
     run_scan(ctx, preprocess=True, translate=ctx.backend is not None, quiet=True)
@@ -197,26 +196,11 @@ def register(app: typer.Typer) -> None:
             show_default=False,
         ),  # noqa: B008
     ) -> None:
-        """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order. Live view on a terminal, one line per function otherwise."""
+        """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order. One line per function as it finishes."""
         ctx = AppContext.load(need_backend=True)
         setup_logging(ctx.ws.logs_dir, run_name="prove")
-        tgts = list(targets or [])
-        if not sys.stdout.isatty():
-            try:
-                code = run_prove(ctx, tgts)
-            finally:
-                ctx.close()
-            raise typer.Exit(code)
-        repo_root = ctx.ws.repo_root
-        ctx.close()  # the worker thread opens its own connections
-        from fver.tui import run_prove_with_tui
-
-        def worker(on_done) -> int:
-            wctx = AppContext.load(repo_root, need_backend=True)
-            try:
-                with console.capture():  # the live view replaces the line output
-                    return run_prove(wctx, tgts, on_done=on_done)
-            finally:
-                wctx.close()
-
-        raise typer.Exit(run_prove_with_tui(repo_root, worker))
+        try:
+            code = run_prove(ctx, list(targets or []))
+        finally:
+            ctx.close()
+        raise typer.Exit(code)

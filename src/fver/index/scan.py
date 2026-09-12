@@ -1,11 +1,11 @@
-"""`fver scan`: capture the build, index functions, run the backend front-end."""
+"""Index the sources: list them, preprocess, extract functions, score, run the
+backend front-end to learn which functions it accepts."""
 
 from __future__ import annotations
 
 import logging
 
 import typer
-from rich.table import Table
 
 from fver.backends.base import BackendToolMissing
 from fver.core.models import Claim, PropertyClass, Status
@@ -14,14 +14,29 @@ from fver.util.log import console
 log = logging.getLogger("fver.scan")
 
 
+def sources_fingerprint(ws) -> str:
+    """Changes whenever any .c or .h file outside .fver/ is added, removed,
+    resized or touched: cheap staleness check for the index."""
+    from fver.core.models import sha256_text
+
+    parts = []
+    for p in sorted(ws.repo_root.rglob("*.[ch]")):
+        if ws.is_inside_workspace(p) or any(
+            x.startswith(".") for x in p.relative_to(ws.repo_root).parts
+        ):
+            continue
+        st = p.stat()
+        parts.append(f"{p.relative_to(ws.repo_root).as_posix()}\0{st.st_size}\0{st.st_mtime_ns}")
+    return sha256_text("\n".join(parts))
+
+
 def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool = False) -> dict:
     """The scan pipeline. Returns the index dict that was written to work/index.json."""
     from fver.index.attack_surface import score
     from fver.index.callgraph import build_callgraph
-    from fver.index.compile_commands import capture_build
     from fver.index.functions import extract_from_tu
     from fver.index.preprocess import preprocess_all
-    from fver.index.targets import compare_target, detect_target
+    from fver.index.sources import list_sources
 
     ws, cfg, ledger = ctx.ws, ctx.config, ctx.ledger
     backend_name = ctx.backend_name
@@ -30,15 +45,8 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
     )
     ok = False
     try:
-        # 1. build capture
-        cap = capture_build(
-            ws.repo_root, cfg.build, compiler=cfg.target.compiler, work_dir=ws.work_dir
-        )
-        for w in cap.warnings:
-            log.warning(w)
-        tus = cap.tus
-        if not quiet:
-            console.print(f"[bold]Build:[/bold] {len(tus)} translation unit(s) from {cap.source}")
+        # 1. sources
+        tus = list_sources(ws.repo_root, cfg.sources, compiler=ctx.target.compiler)
 
         # 2. preprocess
         pp_errors: dict[str, str] = {}
@@ -47,19 +55,10 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
             if pp_errors and not quiet:
                 console.print(
                     f"[yellow]{len(pp_errors)} file(s) could not be read[/] (a header or macro "
-                    "the build would supply is missing). If the project generates headers or "
-                    "needs build-time defines, export its compile_commands.json and set "
-                    "build.compile_commands, or set build.capture_command."
+                    "is missing; `fver status <file>` shows the error)."
                 )
 
-        # 3. target
-        detected = detect_target(cfg.target.compiler)
-        if detected is not None:
-            ws.write_state("target", detected.__dict__)
-        for w in compare_target(detected, ctx.target):
-            log.warning(w)
-
-        # 4. functions
+        # 3. functions
         functions = []
         source_cache: dict[str, str] = {}
         for tu in tus:
@@ -78,7 +77,7 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
                 f, source_cache[f.source_path], cg, cg.externals.get(f.id, [])
             )
 
-        # 5. ledger + index
+        # 4. ledger + index
         ledger.upsert_tus(tus)
         ledger.upsert_functions(functions)
         removed = ledger.prune({t.id for t in tus}, {f.id for f in functions})
@@ -86,7 +85,7 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
             log.info("pruned %d function(s) no longer present in the build", removed)
         index = {
             "run_id": run_id,
-            "build_source": cap.source,
+            "fingerprint": sources_fingerprint(ws),
             "target": ctx.target.key,
             "tus": tus,
             "preprocess_errors": pp_errors,
@@ -95,7 +94,7 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
             "externals": cg.externals,
         }
 
-        # 6. backend front-end
+        # 5. backend front-end
         unsupported: dict[str, str] = {}
         tu_errors: dict[str, str] = {}
         if translate and ctx.backend is not None:
@@ -136,7 +135,7 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
             index["tu_errors"] = tu_errors
         ws.write_state("index", index)
 
-        # 7. proofs whose inputs changed since they were made
+        # 6. proofs whose inputs changed since they were made
         stale = []
         if ctx.backend is not None:
             from fver.prove.invalidate import reconcile
@@ -146,49 +145,14 @@ def run_scan(ctx, preprocess: bool = True, translate: bool = True, quiet: bool =
             ws.write_state("index", index)
 
         if not quiet:
-            _print_summary(
-                tus, pp_errors, functions, unsupported, translate and ctx.backend is not None
-            )
-        if stale and not quiet:
+            n_ok = len(functions) - len(unsupported)
             console.print(
-                f"[magenta]{len(stale)} previously verified function(s) are now stale[/] "
-                "(code or a callee contract changed); `fver verify` will redo them."
+                f"Indexed {len(tus)} file(s), {len(functions)} function(s)"
+                + (f", {n_ok} accepted by the prover" if translate and ctx.backend else "")
+                + (f", {len(stale)} proof(s) now stale" if stale else "")
+                + "."
             )
         ok = True
         return index
     finally:
         ledger.end_run(run_id, ok, "" if ok else "scan failed")
-
-
-def _print_summary(tus, pp_errors, functions, unsupported, translated: bool) -> None:
-    t = Table(title="fver scan", show_header=False)
-    t.add_row("translation units", str(len(tus)))
-    t.add_row("read", f"{len(tus) - len(pp_errors)} ok, {len(pp_errors)} failed")
-    t.add_row("functions", str(len(functions)))
-    if translated:
-        t.add_row("supported by backend", f"{len(functions) - len(unsupported)}")
-        t.add_row("unsupported", str(len(unsupported)))
-    console.print(t)
-
-    top = sorted(functions, key=lambda f: -f.attack_score)[:10]
-    if top:
-        t2 = Table(title="Top attack-surface candidates")
-        t2.add_column("score", justify="right")
-        t2.add_column("function")
-        t2.add_column("file")
-        t2.add_column("why")
-        for f in top:
-            t2.add_row(
-                f"{f.attack_score:.2f}",
-                f.name,
-                f"{f.source_path}:{f.start_line}",
-                "; ".join(r.split(" ", 1)[1] for r in f.attack_reasons[:3]),
-            )
-        console.print(t2)
-    if unsupported:
-        t3 = Table(title="Unsupported functions (first 10)")
-        t3.add_column("function")
-        t3.add_column("reason")
-        for fid, why in list(unsupported.items())[:10]:
-            t3.add_row(fid.split(":", 1)[1], why)
-        console.print(t3)
