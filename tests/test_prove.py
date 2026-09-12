@@ -204,3 +204,21 @@ def test_unsupported_propagates_to_callers_and_missing_contract_is_detected(
     assert MISSING_CONTRACT.findall(
         "Error: The reference type_of_memcpy was not found in the current environment."
     ) == ["memcpy"]
+
+
+def test_check_prints_the_task_and_judges_a_file(repo: Path, monkeypatch, fake_cbmc) -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["check", "add"])
+    assert r.exit_code == 0, r.output
+    assert "prove `add`" in r.output and "int add(int a, int b)" in r.output
+    assert "Null backend" in r.output  # the backend's rules are part of the task
+    sub = repo / ".fver" / "sub.c"
+    sub.write_text("int add(int a, int b) { return a + b; }\n")
+    r = runner.invoke(app, ["check", "add", str(sub)])
+    assert r.exit_code == 1 and "add" in r.output
+    sub.write_text("/* FVER_ACCEPT */\nint add(int a, int b) { return a + b; }\n")
+    r = runner.invoke(app, ["check", "add", str(sub)])
+    assert r.exit_code == 0 and "verified" in r.output and "proofs/src/m.c/add" in r.output
+    r = runner.invoke(app, ["status", "add"])
+    assert "verified" in r.output
+    assert runner.invoke(app, ["check", "nothing"]).exit_code == 1

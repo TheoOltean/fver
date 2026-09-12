@@ -4,6 +4,7 @@ fver setup     install the proof toolchain
 fver init      create .fver/ in the current repository
 fver prove     prove the repository, a file or a function free of undefined behaviour
 fver status    what is proven, what is not, and why
+fver check     prove a function with your own annotations (a coding agent, a script, you)
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ _COMMAND_MODULES = [
     "fver.commands.init",
     "fver.commands.prove",
     "fver.commands.status",
+    "fver.commands.check",
 ]
 
 
