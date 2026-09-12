@@ -58,19 +58,24 @@ FORBIDDEN = [
 ]
 
 
-def _flags_from(arguments: list[str]) -> list[str]:
-    """The -I and -D flags the file is read with."""
+def _flags_from(arguments: list[str], root: Path) -> list[str]:
+    """The -I and -D flags the file is read with, include paths made
+    absolute so Frama-C can run from its own directory (it writes a
+    `.frama-c/` session directory into the current one)."""
     out: list[str] = []
-    skip = False
+    pending: str | None = None
     for a in arguments[1:]:
-        if skip:
-            out.append(a)
-            skip = False
+        if pending is not None:
+            out.append(str(root / a) if pending == "-I" and not a.startswith("/") else a)
+            pending = None
             continue
         if a in ("-I", "-D", "-U", "-include"):
             out.append(a)
-            skip = True
-        elif a.startswith(("-I", "-D", "-U")):
+            pending = a
+        elif a.startswith("-I"):
+            d = a[2:]
+            out.append("-I" + (d if d.startswith("/") else str(root / d)))
+        elif a.startswith(("-D", "-U")):
             out.append(a)
     return out
 
@@ -109,7 +114,7 @@ class FramaCBackend:
         return "gcc_x86_64" if self.target.pointer_bits == 64 else "gcc_x86_32"
 
     def _base_argv(self, tu: TranslationUnit | None) -> list[str]:
-        flags = _flags_from(tu.arguments) if tu else []
+        flags = _flags_from(tu.arguments, Path(tu.directory)) if tu else []
         argv = [self.framac_bin, "-machdep", self._machdep()]
         if flags:
             argv += ["-cpp-extra-args=" + " ".join(shlex.quote(f) for f in flags)]
@@ -137,9 +142,9 @@ class FramaCBackend:
     ) -> TranslateResult:
         """Frama-C parses the whole file or nothing: a parse error makes every
         function unsupported with that reason."""
-        src = repo_root / tu.source_path
+        src = (repo_root / tu.source_path).resolve()
         argv = self._base_argv(tu) + ["-no-autoload-plugins", str(src)]
-        r = run(argv, cwd=repo_root, timeout=300, env=self._env())
+        r = run(argv, cwd=self.workspace_dir, timeout=300, env=self._env())
         supported = {f.name: True for f in functions}
         if r.returncode == 0:
             return TranslateResult(supported=supported)
@@ -282,8 +287,8 @@ class FramaCBackend:
                 artifacts=artifacts,
             )
         r = run(
-            self._check_argv(c_file, task.tu, task.function.name),
-            cwd=task.repo_root,
+            self._check_argv(c_file.resolve(), task.tu, task.function.name),
+            cwd=wd,  # Frama-C writes .frama-c/ into the cwd: keep that inside .fver
             timeout=timeout_seconds,
             env=self._env(),
         )

@@ -151,7 +151,7 @@ def _run(step: Step) -> None:
             if re.search(step.show_only, line):
                 console.print("    " + line.strip())
     else:
-        r = subprocess.run(step.argv, env=env, check=False)
+        r = subprocess.run(step.argv, env=env, check=False, text=True)
     if r.returncode != 0:
         # `opam repo add` of an existing repository is the one benign failure.
         if step.argv[:3] == ["opam", "repo", "add"]:

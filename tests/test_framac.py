@@ -138,7 +138,8 @@ def test_guardrail_and_splice(tmp_path: Path) -> None:
     assert "loop invariant 0 <= i <= 1" in out and "int other(void);" in out
     argv = b._check_argv(tmp_path / "a.c", tu, "clear")
     assert "-wp-rte" in argv and argv[argv.index("-wp-fct") + 1] == "clear"
-    assert any(a.startswith("-cpp-extra-args=") and "-Iinc -DX=1" in a for a in argv)
+    extra = next(a for a in argv if a.startswith("-cpp-extra-args="))
+    assert f"-I{tmp_path}/inc -DX=1" in extra  # include paths absolute: frama-c runs from .fver
 
 
 def test_calls_before_a_local_definition_is_split() -> None:
