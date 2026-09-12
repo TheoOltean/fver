@@ -103,11 +103,20 @@ def classify(
     """`source_line(n)` returns the text of line n of the checked file."""
     text = stdout + "\n" + stderr
     if timed_out:
-        return Classified(
-            CheckOutcome.TOOL_ERROR,
-            "Frama-C timed out. Simplify the loop annotations, or split the invariant into"
-            " smaller facts so each goal is cheap.",
-        )
+        failed = [(g, st) for st, g in _GOAL_STATUS.findall(text)]
+        if not failed:
+            return Classified(
+                CheckOutcome.TOOL_ERROR,
+                "Frama-C ran out of time before reporting any goal. Simplify the loop"
+                " annotations so each goal is cheap.",
+            )
+        lines = [
+            f"Frama-C ran out of time on `{function}` with {len(failed)} goal(s) already"
+            " unproved (the rest were still being tried). Fix these first; each goal that"
+            " times out costs the prover its full time budget:"
+        ]
+        lines += [f"- {g} [{st}]: {meaning_of(g)}" for g, st in failed[:15]]
+        return Classified(CheckOutcome.GOALS_REMAIN, "\n".join(lines))
     errors = _kernel_errors(text)
     if errors:
         return Classified(

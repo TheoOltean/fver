@@ -5,7 +5,7 @@ Z3 when installed).
 Settings ([backend.framac] in config.toml, all optional):
   framac_bin    = "frama-c"
   provers       = "alt-ergo"        comma-separated, in WP's syntax
-  prover_timeout_seconds = 20       per goal
+  prover_timeout_seconds = 10       per goal
 
 Per check, the backend writes one C file into its workspace: the original
 source with the target function replaced by the annotated submission, every
@@ -85,7 +85,7 @@ class FramaCBackend:
         self.target = target
         self.framac_bin: str = self.settings.get("framac_bin") or plat.tool("frama-c")
         self.provers: str = self.settings.get("provers") or "alt-ergo"
-        self.prover_timeout: int = int(self.settings.get("prover_timeout_seconds") or 20)
+        self.prover_timeout: int = int(self.settings.get("prover_timeout_seconds") or 10)
         self._versions: dict[str, str] | None = None
 
     # ----------------------------------------------------------------- tools
@@ -245,7 +245,7 @@ class FramaCBackend:
             "-wp-timeout",
             str(self.prover_timeout),
             "-wp-par",
-            "2",
+            "4",
             "-wp-print",
             "-wp-prop=-@terminates,-@exits",  # neither non-termination nor exit() is UB
             "-warn-invalid-pointer",

@@ -68,6 +68,9 @@ def test_classify_outcomes() -> None:
     e = classify(WP_ERR, "", 1, False, "first_is_a")
     assert e.outcome is CheckOutcome.FRONTEND_ERROR and "valid_read_string" in e.feedback
     assert classify("", "", 0, True, "f").outcome is CheckOutcome.TOOL_ERROR
+    partial = classify(WP_FAIL.split("Proved goals")[0], "", -1, True, "zero_item")
+    assert partial.outcome is CheckOutcome.GOALS_REMAIN and "ran out of time" in partial.feedback
+    assert "loop_invariant_preserved" in partial.feedback
     r = classify(WP_RANGE, "", 1, False, "f")
     assert r.outcome is CheckOutcome.FRONTEND_ERROR and "Invalid infinite range" in r.feedback
     assert "aborted" not in r.feedback
