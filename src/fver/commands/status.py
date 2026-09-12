@@ -180,7 +180,7 @@ def _detail(ctx: AppContext, fn: FunctionInfo) -> None:
         for text in sub.files.values():
             for line in text.splitlines():
                 if "rc::" in line:
-                    console.print("  " + line.strip())
+                    console.print("  " + line.strip(), markup=False, highlight=False)
     if claim and claim.assumptions:
         console.print("\n[bold]Trusted[/] (specs this proof relies on):")
         for a in claim.assumptions:
