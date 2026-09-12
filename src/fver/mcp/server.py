@@ -15,6 +15,7 @@ from typing import Any
 
 from fver.agent import protocol
 from fver.core.context import AppContext
+from fver.util.log import setup_logging
 
 RULES = (
     "Rules: the C code may not be changed, only annotated; no escape hatches "
@@ -26,7 +27,9 @@ RULES = (
 
 def _ctx(need_backend: bool = True) -> AppContext:
     start = Path(os.environ["FVER_REPO"]) if os.environ.get("FVER_REPO") else None
-    return AppContext.load(start, need_backend=need_backend)
+    ctx = AppContext.load(start, need_backend=need_backend)
+    setup_logging(ctx.ws.logs_dir, run_name="mcp", console=False)
+    return ctx
 
 
 def _run(fn, need_backend: bool = True, **kwargs) -> str:

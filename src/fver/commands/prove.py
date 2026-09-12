@@ -10,7 +10,6 @@ the configured budget.
 from __future__ import annotations
 
 import sys
-import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -228,8 +227,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Prove functions free of undefined behaviour: index if needed, check them with CBMC first, then prove in dependency order. Shows the live view on a terminal."""
         ctx = AppContext.load(need_backend=True)
-        run_name = f"prove-{time.strftime('%Y%m%d-%H%M%S')}"
-        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name=run_name)
+        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name="prove")
         tgts = list(targets or [])
         if plain or dry_run or not sys.stdout.isatty():
             try:

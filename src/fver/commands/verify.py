@@ -5,7 +5,6 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -159,8 +158,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Run the LLM proof loop over functions that are not yet verified."""
         ctx = AppContext.load(need_backend=True)
-        run_name = f"verify-{time.strftime('%Y%m%d-%H%M%S')}"
-        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name=run_name)
+        setup_logging(ctx.ws.logs_dir, verbose=verbose, run_name="verify")
         cfg = ctx.config
         assert ctx.backend is not None
 

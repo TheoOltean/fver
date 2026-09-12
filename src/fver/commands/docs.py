@@ -32,7 +32,7 @@ fver produces lives in this directory.
 | `work/` | build capture, preprocessed files, function index | no (gitignored) |
 | `backend/` | the proof backend's private project | no |
 | `cache/` | content-addressed results | no |
-| `logs/` | run logs and LLM transcripts | no |
+| `logs/` | `fver.log` (one rotating file, every command, tagged by command) and `llm/<run>/` transcripts of every model call in API mode | no |
 | `scratch/` | a place for submissions while proving by hand | no |
 
 Workflow: `fver prove` (everything, a file or a function), then `fver status`.

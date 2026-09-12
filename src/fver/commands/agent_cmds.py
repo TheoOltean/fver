@@ -15,7 +15,7 @@ import typer
 
 from fver.agent import protocol
 from fver.core.context import AppContext
-from fver.util.log import console, err_console
+from fver.util.log import console, err_console, setup_logging
 
 
 def _dump(obj) -> None:
@@ -38,6 +38,12 @@ def register(app: typer.Typer) -> None:
     _register(agent_app)
 
 
+def _ctx(need_backend: bool, command: str) -> AppContext:
+    ctx = AppContext.load(need_backend=need_backend)
+    setup_logging(ctx.ws.logs_dir, run_name=f"agent {command}", console=False)
+    return ctx
+
+
 def _register(app: typer.Typer) -> None:
     @app.command("task")
     def task(
@@ -51,7 +57,7 @@ def _register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Print the proving packet for one function: reference, code, context, contracts, prompt."""
-        ctx = AppContext.load(need_backend=True)
+        ctx = _ctx(True, "task")
         if reference is None:
             reference = ctx.config.verify.task_reference
         try:
@@ -82,7 +88,7 @@ def _register(app: typer.Typer) -> None:
         Exit code 0 = verified, 1 = not verified, 2 = tool error. With
         `--submission -` the text on stdin may be the fenced-block reply format.
         """
-        ctx = AppContext.load(need_backend=True)
+        ctx = _ctx(True, "check")
         try:
             if submission == "-":
                 files = {"-": sys.stdin.read()}
@@ -121,7 +127,7 @@ def _register(app: typer.Typer) -> None:
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """The next functions to prove, callees before callers, highest attack surface first."""
-        ctx = AppContext.load(need_backend=True)
+        ctx = _ctx(True, "next")
         if limit is None:
             limit = ctx.config.verify.next_limit
         try:
@@ -146,7 +152,7 @@ def _register(app: typer.Typer) -> None:
         no_scan: bool = typer.Option(False, "--no-scan", help="Do not re-index first."),
     ) -> None:
         """After editing C code: re-index and list stale proofs and unverified functions in modified files."""
-        ctx = AppContext.load(need_backend=False)
+        ctx = _ctx(False, "changed")
         try:
             d = protocol.changed(ctx, quick_scan=not no_scan)
         finally:
