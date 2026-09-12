@@ -176,11 +176,14 @@ def _detail(ctx: AppContext, fn: FunctionInfo) -> None:
     loaded = store.load_accepted(ctx.ws, fn.source_path, fn.name)
     if loaded is not None:
         sub, _record = loaded
-        console.print("\n[bold]Accepted contract[/] (the annotations above the function):")
-        for text in sub.files.values():
-            for line in text.splitlines():
-                if "rc::" in line:
-                    console.print("  " + line.strip(), markup=False, highlight=False)
+        console.print("\n[bold]Accepted contract[/] (what callers rely on):")
+        contract = ctx.backend.extract_spec(sub, fn) if ctx.backend is not None else ""
+        if not contract.strip():
+            contract = "\n".join(
+                ln.strip() for t in sub.files.values() for ln in t.splitlines() if "rc::" in ln
+            )
+        for line in contract.splitlines():
+            console.print("  " + line.rstrip(), markup=False, highlight=False)
     if claim and claim.assumptions:
         console.print("\n[bold]Trusted[/] (specs this proof relies on):")
         for a in claim.assumptions:

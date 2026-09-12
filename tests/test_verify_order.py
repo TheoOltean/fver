@@ -28,6 +28,7 @@ def _fn(name, callees=(), score=0.0, tu="t1", static=False):
 
 def _ctx(tmp_path, fns):
     cfg = FverConfig()
+    cfg.project.backend = "refinedc"  # claims below are recorded under this name
     ws = Workspace.create(tmp_path / "repo", cfg)
     ledger = InMemoryLedger()
     ledger.upsert_functions(fns)

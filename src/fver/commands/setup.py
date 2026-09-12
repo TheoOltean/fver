@@ -3,8 +3,9 @@
 - a C compiler (checked, not installed: it comes with the platform's
   developer tooling)
 - cbmc, the bounded model checker used by `fver hunt`
-- an opam switch named `fver` holding Rocq, Iris, Cerberus and RefinedC,
-  pinned to the commits fver is calibrated against
+- an opam switch named `fver` holding Frama-C with WP and Alt-Ergo (the
+  default checker), and Rocq, Iris, Cerberus and RefinedC pinned to the
+  commits fver is calibrated against (the foundational checker)
 
 Package installs go through the platform's package manager. The opam part
 follows RefinedC's README and takes 20 to 40 minutes the first time; every
@@ -123,6 +124,15 @@ def opam_steps(jobs: int) -> list[Step]:
             ["opam", "install", *sw, "-y", "--confirm-level=unsafe-yes", "refinedc"],
             env=env,
         ),
+        Step(
+            "install Frama-C, WP and Alt-Ergo (10-20 minutes)",
+            ["opam", "install", *sw, "-y", "--confirm-level=unsafe-yes", "frama-c", "alt-ergo"],
+            env=env,
+        ),
+        Step(
+            "register the provers with Why3",
+            [str(plat.switch_bin() / "why3"), "config", "detect"],
+        ),
     ]
     return steps
 
@@ -161,7 +171,11 @@ def run_setup() -> None:
             console.print(f"[bold]==>[/] {step.title}: already done", style="dim")
             continue
         _run(step)
-    missing = [t for t in ("refinedc", "coqc", "dune") if not (plat.switch_bin() / t).exists()]
+    missing = [
+        t
+        for t in ("frama-c", "alt-ergo", "why3", "refinedc", "coqc", "dune")
+        if not (plat.switch_bin() / t).exists()
+    ]
     if missing or not shutil.which("cbmc"):
         err_console.print(
             f"[red]Setup did not finish:[/] missing {', '.join(missing + ([] if shutil.which('cbmc') else ['cbmc']))}. "

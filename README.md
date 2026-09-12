@@ -5,9 +5,11 @@
 fver is a command-line tool you run inside a C repository. Function by
 function it establishes, with a machine-checked proof, that the code cannot
 read or write out of bounds, use freed memory, dereference null, overflow a
-signed integer, or read uninitialised memory. An LLM writes the annotations
-and proofs; a proof checker (RefinedC on Rocq) decides whether they are
-right. fver keeps the books: what is proven, what is not, and why.
+signed integer, or shift out of range. An LLM writes the annotations; a
+proof checker decides whether they are right. The default checker is
+Frama-C with WP and RTE (ACSL contracts, SMT solvers); RefinedC on Rocq is
+available as a foundational alternative. fver keeps the books: what is
+proven, what is not, and why.
 
 fver never edits your source files. Everything it produces lives in
 `.fver/` at the root of your repository.
@@ -20,9 +22,10 @@ curl -fsSL https://raw.githubusercontent.com/TheoOltean/fver/main/get-fver.sh | 
 
 Linux or macOS. This installs `uv` if missing, puts `fver` in
 `~/.local/bin`, then runs `fver setup`, which installs everything else:
-`cbmc`, and an opam switch holding Rocq, Iris, Cerberus and RefinedC pinned
-to the commits fver is tested against. The first run builds the proof
-toolchain and takes 20 to 40 minutes; rerunning resumes where it stopped.
+`cbmc`, and an opam switch holding Frama-C with WP and Alt-Ergo, and Rocq,
+Iris, Cerberus and RefinedC pinned to the commits fver is tested against.
+The first run builds the toolchain and takes 30 to 60 minutes; rerunning
+resumes where it stopped.
 System packages go through brew, apt-get, dnf or pacman. A C compiler must
 already be present.
 
@@ -84,29 +87,32 @@ by proving something trivial:
 |---|---|
 | no out-of-bounds read or write | buffer overflows |
 | no use after free, no double free | heap exploits |
-| no null / dangling / misaligned dereference | crashes |
+| no null / dangling dereference, no pointer arithmetic out of its object | crashes |
 | no signed overflow, division by zero, bad shifts | length-check bypasses |
-| no read of uninitialised memory | information leaks |
+
+(RefinedC additionally proves no read of uninitialised memory; WP does not
+track initialisation.)
 
 The proof for a function depends only on that function's body and the
 contracts of the functions it calls. Editing a function invalidates one
 proof; changing a contract invalidates its callers too; everything else
 stays proven.
 
-## What the checker cannot see
+## Two checkers
 
-RefinedC's semantics has no floating point. fver checks a copy of the code
-in which floating-point types are replaced by same-size structs without
-arithmetic, so a function that only stores, copies or passes float values
-can be verified, and one that computes with them is reported unsupported.
-This is sound for undefined-behaviour proofs because IEEE arithmetic has no
-undefined behaviour of its own and the memory layout is unchanged.
+**Frama-C/WP** (default, `project.backend = "framac"`): the RTE plugin turns
+every potential undefined behaviour into an assertion, WP generates proof
+obligations from the ACSL contract the model writes, and SMT solvers
+discharge them. Frama-C parses essentially all C and ships ACSL
+specifications for the C library, so calls to `memcpy`, `strlen` or `malloc`
+need nothing from the project. The trusted base is Frama-C, WP and the
+solvers.
 
-Also unsupported per function: variadic functions, `setjmp`/`longjmp`
-callers, copying a whole union value, and casts inside integer constant
-expressions (a limitation of the Cerberus front-end that affects any file
-including a header that uses one). `fver status <file>` reports the reason
-for each.
+**RefinedC** (`project.backend = "refinedc"`): ownership types checked in
+Rocq, the smallest trusted base available, at the cost of a front-end that
+rejects char and string literals, casts in constant expressions, unions
+copied by value, varargs, float arithmetic and unsigned wraparound.
+`fver status <file>` reports the reason per function.
 
 ## Trust
 

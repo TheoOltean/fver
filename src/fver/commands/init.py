@@ -42,7 +42,7 @@ def run_init(repo_root: Path, backend: str) -> Path:
 def register(app: typer.Typer) -> None:
     @app.command("init")
     def init(
-        backend: str = typer.Option("refinedc", "--backend", "-b", hidden=True),
+        backend: str = typer.Option("framac", "--backend", "-b", hidden=True),
         path: Path = typer.Option(
             Path("."), "--path", help="Repository root (default: cwd).", hidden=True
         ),  # noqa: B008

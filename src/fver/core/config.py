@@ -19,7 +19,7 @@ CONFIG_FILE_NAME = "config.toml"
 
 
 class ProjectConfig(BaseModel):
-    backend: str = "refinedc"  # "null" only in fver's own tests
+    backend: str = "framac"  # or "refinedc"; "null" only in fver's own tests
 
 
 class SourcesConfig(BaseModel):

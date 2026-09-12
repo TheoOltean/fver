@@ -35,8 +35,9 @@ def test_opam_steps_pin_the_calibrated_commits(monkeypatch):
     flat = " ".join(" ".join(s.argv) for s in steps)
     assert setup.CERBERUS_PIN in flat and setup.REFINEDC_PIN in flat
     assert "coq-released" in flat and "iris-dev" in flat
-    assert steps[-1].argv[-1] == "refinedc" and steps[-1].env["OPAMJOBS"] == "3"
-    assert all("--switch" in s.argv for s in steps[2:])
+    assert steps[-3].argv[-1] == "refinedc" and steps[-3].env["OPAMJOBS"] == "3"
+    assert "frama-c" in steps[-2].argv and steps[-1].argv[-2:] == ["config", "detect"]
+    assert all("--switch" in s.argv for s in steps[2:-1])
 
 
 def test_setup_refuses_without_package_manager(monkeypatch):

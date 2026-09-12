@@ -34,7 +34,7 @@ def test_init_creates_layout_and_config(repo):
         assert (ws.root / d).is_dir()
     assert "config.toml" in (ws.root / ".gitignore").read_text()
     cfg = load_config(repo)
-    assert cfg.project.backend == "refinedc" and ws.project_name == "proj"
+    assert cfg.project.backend == "framac" and ws.project_name == "proj"
     # The file shows the few knobs a user touches, at their defaults, with every
     # other key and its default in the header comment.
     text = (ws.root / "config.toml").read_text()

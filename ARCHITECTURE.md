@@ -9,7 +9,7 @@ state lives in `<repo>/.fver/`.
 | `index/` | `sources.py` which .c files and how to read each (own dir + every header dir, no macros); `preprocess.py`; `functions.py` tree-sitter extraction; `callgraph.py`; `attack_surface.py` the ranking; `targets.py` ABI detection; `scan.py` the pipeline, ending with the backend front-end saying which functions it accepts | via the Backend interface |
 | `ledger/` | `api.py` the `Ledger` protocol, `sqlite.py` the implementation (WAL, concurrent workers), `memory.py` for tests, `cache.py` cache keys | no |
 | `prove/` | `select.py` chooses and orders functions (callees first); `hunt.py` + `cbmc.py` run CBMC first; `loop.py` the propose, check, repair loop with guardrails and budget; `client.py` the Anthropic client (and the scripted fake); `prompts.py`, `parse.py`, `store.py` (proof files and cache), `invalidate.py` (staleness), `retrieval.py` (examples), `pricing.py` | via the Backend interface |
-| `backends/` | `base.py` the `Backend` interface; `refinedc/` the one real backend (annotation grammar, opaque floats, output parsing, guardrails, audit); `null.py` for tests | yes |
+| `backends/` | `base.py` the `Backend` interface; `framac/` the default (ACSL helpers, WP output parsing, guardrails); `refinedc/` the foundational one (annotation grammar, opaque floats, output parsing, audit); `null.py` for tests | yes |
 | `commands/` | `setup`, `init`, `prove`, `status`: thin typer wrappers | via AppContext |
 
 ```
@@ -30,8 +30,8 @@ to the prover.
 
 ## Guardrails
 
-The LLM may add `[[rc::...]]` annotations and Rocq lemmas; it may not change
-the C. `backend.guardrail` compares the submission with the original function
+The LLM may add annotations (ACSL comments for Frama-C, `[[rc::...]]`
+attributes and Rocq lemmas for RefinedC); it may not change the C. `backend.guardrail` compares the submission with the original function
 token by token before the checker runs, and rejects `Admitted`, new axioms
 and `rc::trust_me`. Every accepted proof is audited with `Print Assumptions`;
 the assumptions land in the claim.
