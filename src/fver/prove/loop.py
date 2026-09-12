@@ -624,28 +624,68 @@ class Verifier:
         recheck: bool = False,
         on_done: Callable[[FunctionInfo, FunctionOutcome], None] | None = None,
     ) -> list[FunctionOutcome]:
-        """Verify functions in attack-score order, stopping when the run cap is hit."""
-        ordered = sorted(functions, key=lambda fn: (-fn.attack_score, fn.source_path, fn.name))
+        """Verify functions in the given order (callees first), stopping when
+        the run cap is hit. A function is not started while a callee that is
+        part of this run is still unfinished, and one whose callee finished
+        without a contract is recorded as blocked without spending anything:
+        the checker needs the callee's contract to check the caller at all."""
         work = self.recheck_function if recheck else self.verify_function
         outcomes: list[FunctionOutcome] = []
         parallelism = max(1, parallelism)
         fatal: FatalAgentError | None = None
+        selected = {fn.id: fn for fn in functions}
+        deps = {fn.id: self._selected_callees(fn, selected) for fn in functions}
+        finished: set[str] = set()
+
+        def has_contract(fid: str) -> bool:
+            f = selected[fid]
+            return store.load_accepted(self.ws, f.source_path, f.name) is not None
+
+        def blocked_by(fn: FunctionInfo) -> list[str]:
+            return [selected[d].name for d in deps[fn.id] if d in finished and not has_contract(d)]
+
+        def ready(fn: FunctionInfo) -> bool:
+            return all(d in finished for d in deps[fn.id])
+
         with ThreadPoolExecutor(max_workers=parallelism) as pool:
             pending: dict[Future, FunctionInfo] = {}
-            queue = list(ordered)
+            queue = list(functions)
             while queue or pending:
                 while queue and len(pending) < parallelism and fatal is None:
                     if self.run_cost.usd >= max_usd_run:
                         log.warning("run budget of $%.2f reached; not scheduling more", max_usd_run)
                         queue.clear()
                         break
-                    fn = queue.pop(0)
+                    idx = next((i for i, f in enumerate(queue) if ready(f)), None)
+                    if idx is None:
+                        if pending:
+                            break  # wait for a callee to finish
+                        idx = 0  # only cycles left: start the first anyway
+                    fn = queue.pop(idx)
+                    missing = blocked_by(fn)
+                    if missing:
+                        task = self.build_task(fn)
+                        claim = self._claim(
+                            task,
+                            Status.UNRESOLVED,
+                            self.cache_key_for(task),
+                            Cost(),
+                            "blocked: no contract for callee " + ", ".join(sorted(missing)),
+                        )
+                        self.ledger.record_claim(claim)
+                        outcome = FunctionOutcome(claim)
+                        outcomes.append(outcome)
+                        finished.add(fn.id)
+                        if on_done:
+                            on_done(fn, outcome)
+                        continue
                     pending[pool.submit(work, fn)] = fn
                 if not pending:
                     break
                 done, _ = wait(list(pending), return_when=FIRST_COMPLETED)
                 for fut in done:
                     fn = pending.pop(fut)
+                    finished.add(fn.id)
                     try:
                         outcome = fut.result()
                     except FatalAgentError as e:
@@ -668,6 +708,20 @@ class Verifier:
         if fatal is not None:
             raise fatal
         return outcomes
+
+    def _selected_callees(self, fn: FunctionInfo, selected: dict[str, FunctionInfo]) -> set[str]:
+        """Ids of `fn`'s callees that are part of this run (same TU preferred,
+        else a non-static definition), excluding itself."""
+        out: set[str] = set()
+        for name in fn.callees:
+            if name == fn.name:
+                continue
+            cands = [c for c in self.ledger.find_functions(name=name) if c.id in selected]
+            same_tu = [c for c in cands if c.tu_id == fn.tu_id]
+            pick = same_tu or [c for c in cands if not c.is_static] or []
+            if pick:
+                out.add(pick[0].id)
+        return out
 
 
 def workdir_for(ws_backend_dir: Path, function_id: str) -> Path:

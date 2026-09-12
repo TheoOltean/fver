@@ -133,3 +133,39 @@ def test_prove_reindexes_after_an_edit(repo: Path, monkeypatch, fake_cbmc) -> No
     r = CliRunner().invoke(app, ["prove", "add"])
     assert r.exit_code == 0, r.output
     assert "Indexing" in r.output and "verified" in r.output
+
+
+def test_caller_waits_for_callee_and_is_blocked_without_its_contract(
+    repo: Path, monkeypatch
+) -> None:
+    """`twice` calls `add`. With two workers the caller must not start before the
+    callee finishes, and when the callee ends without an accepted contract the
+    caller is recorded as blocked at no cost."""
+
+    class NoHunter:
+        name = "cbmc"
+
+        def run(self, *a, **k):
+            return []
+
+    monkeypatch.setattr(hunt_mod, "CbmcHunter", NoHunter)
+    cfg = repo / ".fver" / "config.toml"
+    cfg.write_text(cfg.read_text() + "\nmax_attempts_per_function = 1\nparallelism = 2\n")
+    fake = repo / ".fver" / "fake.json"
+    monkeypatch.setenv("FVER_FAKE_LLM", str(fake))
+    fake.write_text(
+        json.dumps(["```c file=function.c\nint add(int a, int b) { return a + b; }\n```"])
+    )
+    r = CliRunner().invoke(app, ["prove"])
+    assert r.exit_code == 0, r.output
+    assert "blocked" in r.output
+    ctx = AppContext.load(repo, need_backend=False)
+    try:
+        rows = {
+            r.function.name: (r.status.value, r.claim.message if r.claim else "")
+            for r in ctx.ledger.list_functions("null", ctx.target.key)
+        }
+    finally:
+        ctx.close()
+    assert rows["add"][0] == "unresolved"
+    assert rows["twice"] == ("unresolved", "blocked: no contract for callee add")

@@ -170,8 +170,13 @@ def run_prove(
                 if out.cache_hit
                 else f" ({out.attempts} attempt(s), ${out.claim.cost.usd:.2f})"
             )
+            why = (
+                f"  {out.claim.message}"
+                if out.claim.status is not Status.VERIFIED and out.claim.message
+                else ""
+            )
             console.print(
-                f"[{colour}]{out.claim.status.value:12}[/] {fn.name}  {fn.source_path}{tag}"
+                f"[{colour}]{out.claim.status.value:12}[/] {fn.name}  {fn.source_path}{tag}{why}"
             )
 
     code = 0

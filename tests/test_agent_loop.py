@@ -171,16 +171,20 @@ def test_refusal_once_then_accept(tmp_path):
     assert out.claim.status is Status.VERIFIED and len(llm.calls) == 2
 
 
-def test_run_orders_by_attack_score_and_accumulates_cost(tmp_path):
+def test_run_keeps_the_given_order_and_accumulates_cost(tmp_path):
+    """The caller decides the order (callees first); the loop only defers a
+    function whose callee in the run is unfinished."""
     _ctx, _llm, v, (helper, zero, use), _ = _setup(tmp_path, [ACCEPT, ACCEPT, ACCEPT])
     done = []
     outs = v.run(
-        [helper, use, zero],
+        [zero, use, helper],
         max_usd_run=10.0,
         parallelism=1,
         on_done=lambda f, o: done.append(f.name),
     )
-    assert done == ["zero", "use", "helper"]
+    assert done == (
+        ["zero", "helper", "use"] if "helper" in use.callees else ["zero", "use", "helper"]
+    )
     assert all(o.claim.status is Status.VERIFIED for o in outs)
     assert v.run_cost.llm_calls == 3 and v.run_cost.usd > 0
 
